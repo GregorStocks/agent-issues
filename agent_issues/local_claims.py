@@ -204,6 +204,21 @@ def current_owner_claims(
         return [record for record in claims.values() if _same_owner(record, context)]
 
 
+def release_current_owner_claims(
+    namespace: str, repo_root: Path | None = None
+) -> list[ClaimRecord]:
+    """Release all claims owned by the current worktree. Returns the released claims."""
+    context = current_worktree_context(repo_root)
+    with _locked_namespace(context, namespace):
+        claims = _load_claims_locked(context, namespace)
+        released = []
+        for record in claims.values():
+            if _same_owner(record, context):
+                record.claim_path.unlink(missing_ok=True)
+                released.append(record)
+        return released
+
+
 def _claim_payload(
     context: WorktreeContext,
     namespace: str,

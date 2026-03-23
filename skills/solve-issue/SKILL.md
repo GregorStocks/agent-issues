@@ -126,6 +126,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
 10. Delete the issue file (e.g., `rm issues/<issue-filename>.json5`) and **include the deletion in the commit** — the issue removal must ship with the fix.
 
     - If you merged the default branch after claiming, re-check whether the issue file was renamed (for example to add a priority prefix or `blocked-` prefix) and delete the renamed path that now exists on your branch.
+    - After the file is deleted, `issue-claim --current` may stop working because it resolves the claim against issue files on disk. That does **not** mean the claim itself is gone. `issue-finalize-pr` reads the local claim store directly and still works; do not recreate the deleted issue file just to make `issue-claim --current` happy.
 
 11. **Document ALL issues you discover** during exploration, even if you're only fixing one. Future agents benefit from this documentation!
 
@@ -157,7 +158,13 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
 ## Abandoning an Issue
 
-If you determine an issue isn't worth fixing after claiming it, do **not** improvise claim cleanup. If the current tree has a documented abandon helper, use it. Otherwise stop, tell the user the issue should be abandoned, and wait for direction before touching the local claim files manually.
+If you determine an issue isn't worth fixing after claiming it, run:
+
+   ```bash
+   issue-abandon
+   ```
+
+   This releases the local claim so another worktree can pick up the issue. See `/abandon-issue` for the full workflow including branch cleanup.
 
 Then restart from step 1 to pick a different issue.
 
