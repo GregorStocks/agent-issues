@@ -149,3 +149,28 @@ def test_catches_legacy_json_extension(tmp_path: Path) -> None:
     (issues_dir / "p2-legacy.json").write_text("{}")
     errors = issue_lint.lint_issues(tmp_path)
     assert errors == ["p2-legacy.json: legacy issue file extension; rename to .json5"]
+
+
+def test_catches_long_lines(tmp_path: Path) -> None:
+    issues_dir = tmp_path / "issues"
+    issues_dir.mkdir()
+    issue = _make_valid_issue()
+    issue["description"] = "word " * 200  # ~1000 chars on one line
+    # Write raw JSON to avoid dumps_json5 wrapping it for us.
+    import json
+
+    (issues_dir / "p2-long-lines.json5").write_text(json.dumps(issue, indent=2))
+    errors = issue_lint.lint_issues(tmp_path)
+    assert any("line too long" in e for e in errors)
+    assert any("issue-fmt" in e for e in errors)
+
+
+def test_formatted_issue_passes_line_length(tmp_path: Path) -> None:
+    """An issue written through dumps_json5 should never trigger line-length."""
+    issues_dir = tmp_path / "issues"
+    issues_dir.mkdir()
+    issue = _make_valid_issue()
+    issue["description"] = "word " * 200
+    _write_issue(issues_dir, "p2-wrapped-issue", issue)
+    errors = issue_lint.lint_issues(tmp_path)
+    assert not any("line too long" in e for e in errors)
