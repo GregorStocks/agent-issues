@@ -1,0 +1,74 @@
+#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+"""Reformat issue JSON5 files for consistent style and line width.
+
+Usage:
+    issue-fmt              # format issues/ in current directory
+    issue-fmt <path>       # format issues/ under <path>
+"""
+
+import sys
+from pathlib import Path
+
+from agent_issues.issue_files import iter_issue_files, load_issue
+from agent_issues.json5_utils import dumps_json5
+
+FIELD_ORDER = [
+    "title",
+    "description",
+    "status",
+    "priority",
+    "type",
+    "labels",
+    "blocked",
+    "created_at",
+    "updated_at",
+]
+
+
+def fmt_issue(path: Path) -> bool:
+    """Reformat a single issue file.  Returns True if the file changed."""
+    issue = load_issue(path)
+
+    ordered: dict = {}
+    for field in FIELD_ORDER:
+        if field in issue:
+            ordered[field] = issue[field]
+    for field in issue:
+        if field not in ordered:
+            ordered[field] = issue[field]
+
+    formatted = dumps_json5(ordered) + "\n"
+    original = path.read_text()
+
+    if formatted == original:
+        return False
+
+    path.write_text(formatted)
+    return True
+
+
+def main() -> None:
+    if len(sys.argv) > 1:
+        project_root = Path(sys.argv[1]).resolve()
+    else:
+        project_root = Path.cwd()
+
+    issues_dir = project_root / "issues"
+    if not issues_dir.exists():
+        print("No issues/ directory found")
+        return
+
+    changed = 0
+    for issue_file in iter_issue_files(issues_dir):
+        if fmt_issue(issue_file):
+            changed += 1
+            print(f"Formatted: {issue_file.name}")
+
+    if changed:
+        print(f"\n{changed} file(s) reformatted")
+    else:
+        print("All issues already formatted")
+
+
+if __name__ == "__main__":
+    main()
