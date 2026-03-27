@@ -1,30 +1,14 @@
-"""Tests for bin/issue-autoclaim."""
+"""Tests for agent_issues.cli.issue_autoclaim."""
 
-import importlib.machinery
-import importlib.util
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent_issues.cli import issue_autoclaim
 from agent_issues.json5_utils import dumps_json5
 from agent_issues.local_claims import ClaimRecord
-
-BIN_DIR = Path(__file__).resolve().parent.parent / "bin"
-
-
-def _import_script(name: str):
-    path = BIN_DIR / name
-    loader = importlib.machinery.SourceFileLoader(name, str(path))
-    spec = importlib.util.spec_from_loader(name, loader, origin=str(path))
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-issue_autoclaim = _import_script("issue-autoclaim")
 
 
 def _claim_record(key: str) -> ClaimRecord:
@@ -89,11 +73,7 @@ def test_main_auto_claims_first_available(tmp_path: Path, capsys) -> None:
     with (
         patch.object(sys, "argv", ["issue-autoclaim"]),
         patch.object(issue_autoclaim, "merge_default_branch"),
-        patch.object(
-            issue_autoclaim,
-            "_default_branch",
-            return_value="main",
-        ),
+        patch.object(issue_autoclaim, "default_branch", return_value="main"),
         patch.object(
             issue_autoclaim,
             "current_worktree_context",
@@ -120,11 +100,7 @@ def test_main_exits_1_when_no_claimable_issue(tmp_path: Path) -> None:
     with (
         patch.object(sys, "argv", ["issue-autoclaim"]),
         patch.object(issue_autoclaim, "merge_default_branch"),
-        patch.object(
-            issue_autoclaim,
-            "_default_branch",
-            return_value="main",
-        ),
+        patch.object(issue_autoclaim, "default_branch", return_value="main"),
         patch.object(
             issue_autoclaim,
             "current_worktree_context",
@@ -146,11 +122,7 @@ def test_main_exits_2_when_worktree_already_claims_issue(tmp_path: Path) -> None
     with (
         patch.object(sys, "argv", ["issue-autoclaim"]),
         patch.object(issue_autoclaim, "merge_default_branch"),
-        patch.object(
-            issue_autoclaim,
-            "_default_branch",
-            return_value="main",
-        ),
+        patch.object(issue_autoclaim, "default_branch", return_value="main"),
         patch.object(
             issue_autoclaim,
             "current_worktree_context",
@@ -174,11 +146,7 @@ def test_main_exits_2_on_default_branch(tmp_path: Path) -> None:
     with (
         patch.object(sys, "argv", ["issue-autoclaim"]),
         patch.object(issue_autoclaim, "merge_default_branch"),
-        patch.object(
-            issue_autoclaim,
-            "_default_branch",
-            return_value="main",
-        ),
+        patch.object(issue_autoclaim, "default_branch", return_value="main"),
         patch.object(
             issue_autoclaim,
             "current_worktree_context",

@@ -1,17 +1,5 @@
-#!/bin/sh
-""":"
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if command -v uv >/dev/null 2>&1; then
-    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
-fi
-exec python3 "$0" "$@"
-":"""
-"""Validate issue JSON5 files in issues/ directory.
+"""Validate issue JSON5 files in an issues directory."""
 
-Usage:
-    issue-lint              # lint issues/ in current directory
-    issue-lint <path>       # lint issues/ under <path>
-"""
 import re
 import sys
 from pathlib import Path
@@ -55,28 +43,21 @@ def lint_issues(project_root: Path) -> list[str]:
     for issue_file in iter_issue_files(issues_dir):
         try:
             issue = load_issue(issue_file)
-        except pyjson5.Json5DecoderException as e:
-            errors.append(f"{issue_file.name}: invalid JSON5 - {e}")
+        except pyjson5.Json5DecoderException as exc:
+            errors.append(f"{issue_file.name}: invalid JSON5 - {exc}")
             continue
 
-        # Filename is the id
         if "id" in issue:
             errors.append(f"{issue_file.name}: has 'id' field (filename serves as id)")
 
-        # Check required fields
         missing = REQUIRED_FIELDS - set(issue.keys())
         if missing:
-            errors.append(
-                f"{issue_file.name}: missing fields: {', '.join(sorted(missing))}"
-            )
+            errors.append(f"{issue_file.name}: missing fields: {', '.join(sorted(missing))}")
             continue
 
-        # Reject unknown fields
         unknown = set(issue.keys()) - KNOWN_FIELDS
         if unknown:
-            errors.append(
-                f"{issue_file.name}: unknown fields: {', '.join(sorted(unknown))}"
-            )
+            errors.append(f"{issue_file.name}: unknown fields: {', '.join(sorted(unknown))}")
 
         if not FILENAME_RE.fullmatch(issue_file.stem):
             errors.append(
@@ -90,26 +71,22 @@ def lint_issues(project_root: Path) -> list[str]:
                     f"{issue_file.name}: filename prefix must be '{expected_prefix}-' for this issue"
                 )
 
-        # Resolved/closed issues should be deleted
         if issue["status"] != "open":
             errors.append(
                 f"{issue_file.name}: status is '{issue['status']}' (delete resolved issues)"
             )
 
-        # Priority should be 1-4
         if not isinstance(issue["priority"], int) or not 1 <= issue["priority"] <= 4:
             errors.append(
                 f"{issue_file.name}: priority must be int 1-4, got {issue['priority']}"
             )
 
-        # Labels should be a list
         if not isinstance(issue["labels"], list):
             errors.append(f"{issue_file.name}: labels must be an array")
 
         if "blocked" in issue and not isinstance(issue["blocked"], (bool, str)):
             errors.append(f"{issue_file.name}: blocked must be a boolean or string")
 
-        # Line-length check (on the raw file, not parsed data).
         raw = issue_file.read_text()
         for line_no, raw_line in enumerate(raw.split("\n"), 1):
             if len(raw_line) > MAX_LINE_LENGTH:
@@ -117,7 +94,7 @@ def lint_issues(project_root: Path) -> list[str]:
                     f"{issue_file.name}:{line_no}: line too long "
                     f"({len(raw_line)} > {MAX_LINE_LENGTH}); run issue-fmt"
                 )
-                break  # one error per file is enough
+                break
 
     return errors
 
@@ -136,7 +113,3 @@ def main() -> None:
         sys.exit(1)
 
     print("Issues: OK")
-
-
-if __name__ == "__main__":
-    main()

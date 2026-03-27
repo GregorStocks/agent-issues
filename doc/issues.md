@@ -39,7 +39,12 @@ Use real timestamps (the actual time you're creating the issue), not `00:00:00` 
 
 ## CLI Tools
 
-If [agent-issues](https://github.com/GregorStocks/agent-issues) is installed, these commands are available:
+Install the CLI with `uv tool install --editable /path/to/agent-issues`.
+
+If the tool executable directory is not already on your `PATH`, run `uv tool update-shell`
+or inspect it with `uv tool dir --bin`.
+
+Once installed, these commands are available:
 
 ### List all issues with priority
 
@@ -93,16 +98,6 @@ issue-watch-pr [<pr-number>]
 issue-lint [<project-root>]
 ```
 
-## Script launcher notes
-
-The `bin/issue-*` commands use a small shell/Python polyglot preamble instead of a
-shebang like `#!/usr/bin/env -S uv run ...`.
-
-That is intentional:
-
-- macOS ships BSD `env`, and its `-S` handling is not portable enough for these launchers
-- shebangs do not expand shell variables like `${HOME}`, so paths in the interpreter
-  line are brittle even when `env -S` exists
-- the polyglot preamble keeps the files directly executable, runs them through
-  `uv run --project ...` when `uv` is installed, and still lets the test suite import
-  the scripts as plain Python modules
+These commands are exposed through `[project.scripts]` entrypoints in
+`pyproject.toml`, so `uv` generates the platform-native launchers for macOS, Linux,
+and Windows.

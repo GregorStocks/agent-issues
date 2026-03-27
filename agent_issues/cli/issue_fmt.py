@@ -1,17 +1,5 @@
-#!/bin/sh
-""":"
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if command -v uv >/dev/null 2>&1; then
-    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
-fi
-exec python3 "$0" "$@"
-":"""
-"""Reformat issue JSON5 files for consistent style and line width.
+"""Reformat issue JSON5 files for consistent style and line width."""
 
-Usage:
-    issue-fmt              # format issues/ in current directory
-    issue-fmt <path>       # format issues/ under <path>
-"""
 import sys
 from pathlib import Path
 
@@ -32,7 +20,7 @@ FIELD_ORDER = [
 
 
 def fmt_issue(path: Path) -> bool:
-    """Reformat a single issue file.  Returns True if the file changed."""
+    """Reformat a single issue file. Returns True if the file changed."""
     issue = load_issue(path)
 
     ordered: dict = {}
@@ -74,7 +62,3 @@ def main() -> None:
         print(f"\n{changed} file(s) reformatted")
     else:
         print("All issues already formatted")
-
-
-if __name__ == "__main__":
-    main()

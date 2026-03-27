@@ -1,34 +1,13 @@
-#!/bin/sh
-""":"
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-if command -v uv >/dev/null 2>&1; then
-    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
-fi
-exec python3 "$0" "$@"
-":"""
-"""Watch a PR until CI completes, then report results and review feedback.
+"""Watch a PR until checks and review feedback settle."""
 
-Usage:
-    issue-watch-pr [<pr-number>]
-
-Polls CI checks every 30s. Once all checks finish, also reports any
-review comments or change requests on the PR.
-
-Exit codes:
-    0  All checks passed, no review feedback
-    1  One or more checks failed
-    2  Review feedback found
-    3  Both failures and feedback
-    4  Timed out waiting for checks
-"""
 import json
 import subprocess
 import sys
 import time
 
-POLL_INTERVAL = 30  # seconds
-TIMEOUT = 1800  # 30 minutes
-STARTUP_GRACE = 120  # wait up to 2min for checks to appear
+POLL_INTERVAL = 30
+TIMEOUT = 1800
+STARTUP_GRACE = 120
 
 _PASS_BUCKETS = {"pass", "skipping"}
 
@@ -44,14 +23,12 @@ def get_pr_number() -> str:
 
 
 def get_repo_nwo() -> str:
-    """Get owner/repo for API calls."""
     result = run_gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     assert result.returncode == 0, f"Failed to get repo info: {result.stderr}"
     return result.stdout.strip()
 
 
 def check_merge_conflict(pr: str) -> bool:
-    """Return True if the PR has a merge conflict."""
     result = run_gh("pr", "view", pr, "--json", "mergeable", "--jq", ".mergeable")
     if result.returncode != 0:
         return False
@@ -67,62 +44,48 @@ def get_checks(pr: str) -> list[dict]:
 
 
 def should_stop_polling(checks: list[dict]) -> bool:
-    """Return True if we have enough info to report: any non-pass terminal state or all done."""
     if not checks:
         return False
-    for c in checks:
-        bucket = c.get("bucket")
+    for check in checks:
+        bucket = check.get("bucket")
         if bucket not in _PASS_BUCKETS and bucket not in ("pending", None):
             return True
-    return all(c.get("bucket") not in ("pending", None) for c in checks)
+    return all(check.get("bucket") not in ("pending", None) for check in checks)
 
 
 def get_review_feedback(pr: str, nwo: str) -> list[str]:
-    """Get review comments, change requests, and inline comments."""
     result = run_gh("pr", "view", pr, "--json", "author,reviews,comments")
     assert result.returncode == 0, f"Failed to fetch PR details: {result.stderr}"
     data = json.loads(result.stdout)
     pr_author = data["author"]["login"]
 
     feedback = []
-
-    # Only consider the latest review per author (earlier reviews are superseded)
     latest_review: dict[str, dict] = {}
-    reviews = data.get("reviews")
-    if reviews is None:
-        reviews = []
+    reviews = data.get("reviews") or []
     for review in reviews:
-        author = review["author"]["login"]
-        latest_review[author] = review
+        latest_review[review["author"]["login"]] = review
 
     for author, review in latest_review.items():
         state = review.get("state")
-        if state in ("APPROVED", "PENDING", "DISMISSED"):
-            continue
-        if author == pr_author:
+        if state in ("APPROVED", "PENDING", "DISMISSED") or author == pr_author:
             continue
         body = review.get("body")
         body = body.strip() if body else None
         if body:
             feedback.append(f"[{state}] @{author}: {body}")
         else:
-            # CHANGES_REQUESTED with no body means inline-only review
             feedback.append(f"[{state}] @{author} (see inline comments)")
 
-    comments = data.get("comments")
-    if comments is None:
-        comments = []
+    comments = data.get("comments") or []
     for comment in comments:
         author = comment["author"]["login"]
         if author == pr_author:
             continue
         body = comment.get("body")
         body = body.strip() if body else None
-        if not body:
-            continue
-        feedback.append(f"[COMMENT] @{author}: {body}")
+        if body:
+            feedback.append(f"[COMMENT] @{author}: {body}")
 
-    # Inline review comments (diff-level) are a separate API endpoint
     inline_result = run_gh(
         "api",
         "--paginate",
@@ -152,59 +115,36 @@ def main() -> None:
     print(f"Watching PR #{pr}...", flush=True)
 
     start = time.monotonic()
-
-    # Wait for checks to appear
     checks = get_checks(pr)
     while not checks:
         elapsed = time.monotonic() - start
-        assert elapsed <= STARTUP_GRACE, (
-            f"No CI checks found for PR #{pr} after {STARTUP_GRACE}s"
-        )
+        assert elapsed <= STARTUP_GRACE, f"No CI checks found for PR #{pr} after {STARTUP_GRACE}s"
         print("Waiting for checks to start...", flush=True)
         time.sleep(POLL_INTERVAL)
         checks = get_checks(pr)
 
-    # Poll until all checks finish
     while not should_stop_polling(checks):
         elapsed = time.monotonic() - start
         if elapsed > TIMEOUT:
-            pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
-            print(
-                f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
-                flush=True,
-            )
+            pending = [check["name"] for check in checks if check.get("bucket") == "pending"]
+            print(f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}", flush=True)
             sys.exit(4)
 
         if check_merge_conflict(pr):
-            print(
-                "\nPR has a merge conflict with the base branch. "
-                "Merge or rebase to resolve.",
-                flush=True,
-            )
+            print("\nPR has a merge conflict with the base branch. Merge or rebase to resolve.", flush=True)
             sys.exit(1)
 
-        pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
+        pending = [check["name"] for check in checks if check.get("bucket") == "pending"]
         mins = int(elapsed // 60)
-        print(
-            f"  [{mins}m] {len(pending)} pending: {', '.join(pending[:5])}",
-            flush=True,
-        )
+        print(f"  [{mins}m] {len(pending)} pending: {', '.join(pending[:5])}", flush=True)
         time.sleep(POLL_INTERVAL)
         checks = get_checks(pr)
 
-    # Check for merge conflict before reporting
     if check_merge_conflict(pr):
-        print(
-            "\nPR has a merge conflict with the base branch. "
-            "Merge or rebase to resolve.",
-            flush=True,
-        )
+        print("\nPR has a merge conflict with the base branch. Merge or rebase to resolve.", flush=True)
         sys.exit(1)
 
-    # Collect results
-    failed = [
-        c for c in checks if c.get("bucket") not in _PASS_BUCKETS | {"pending", None}
-    ]
+    failed = [check for check in checks if check.get("bucket") not in _PASS_BUCKETS | {"pending", None}]
     feedback = get_review_feedback(pr, nwo)
 
     exit_code = 0
@@ -212,26 +152,21 @@ def main() -> None:
     if failed:
         exit_code |= 1
         print(f"\n{len(failed)} check(s) FAILED:")
-        for c in failed:
-            print(f"  - {c['name']} ({c.get('bucket')}): {c.get('link', 'no link')}")
+        for check in failed:
+            print(f"  - {check['name']} ({check.get('bucket')}): {check.get('link', 'no link')}")
 
     if feedback:
         exit_code |= 2
         print(f"\n{len(feedback)} review comment(s):")
-        for fb in feedback:
-            print(f"  {fb}")
+        for item in feedback:
+            print(f"  {item}")
 
     if exit_code == 0:
-        passed = [c for c in checks if c.get("bucket") == "pass"]
-        skipped = [c for c in checks if c.get("bucket") == "skipping"]
+        passed = [check for check in checks if check.get("bucket") == "pass"]
+        skipped = [check for check in checks if check.get("bucket") == "skipping"]
         print(
-            f"\nAll checks passed ({len(passed)} passed, {len(skipped)} skipped). "
-            "No review feedback.",
+            f"\nAll checks passed ({len(passed)} passed, {len(skipped)} skipped). No review feedback.",
             flush=True,
         )
 
     sys.exit(exit_code)
-
-
-if __name__ == "__main__":
-    main()
