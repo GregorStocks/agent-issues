@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Query issues from the issues/ directory.
 
 Usage:
@@ -7,7 +14,6 @@ Usage:
     issue-query --max-priority 2          # P1 and P2 only
     issue-query --search "streaming"      # search titles and descriptions
 """
-
 import argparse
 from pathlib import Path
 

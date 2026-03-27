@@ -1,11 +1,17 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Validate issue JSON5 files in issues/ directory.
 
 Usage:
     issue-lint              # lint issues/ in current directory
     issue-lint <path>       # lint issues/ under <path>
 """
-
 import re
 import sys
 from pathlib import Path

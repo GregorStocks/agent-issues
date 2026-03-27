@@ -92,3 +92,17 @@ issue-watch-pr [<pr-number>]
 ```bash
 issue-lint [<project-root>]
 ```
+
+## Script launcher notes
+
+The `bin/issue-*` commands use a small shell/Python polyglot preamble instead of a
+shebang like `#!/usr/bin/env -S uv run ...`.
+
+That is intentional:
+
+- macOS ships BSD `env`, and its `-S` handling is not portable enough for these launchers
+- shebangs do not expand shell variables like `${HOME}`, so paths in the interpreter
+  line are brittle even when `env -S` exists
+- the polyglot preamble keeps the files directly executable, runs them through
+  `uv run --project ...` when `uv` is installed, and still lets the test suite import
+  the scripts as plain Python modules

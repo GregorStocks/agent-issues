@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Claim an issue — either a specific one or the highest-priority unclaimed one.
 
 Merges origin/<default-branch> first, then either claims the named issue or
@@ -13,7 +20,6 @@ Exit codes:
     1  No claimable issues available / named issue already claimed
     2  Bad input
 """
-
 import subprocess
 import sys
 from pathlib import Path

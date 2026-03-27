@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Push, create/update a PR for the current branch, and mark it ready.
 
 Usage:
@@ -8,7 +15,6 @@ Exit codes:
     0  Success
     1  No local issue claim found for the current worktree
 """
-
 import argparse
 import json
 import subprocess

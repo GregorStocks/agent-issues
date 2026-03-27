@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Watch a PR until CI completes, then report results and review feedback.
 
 Usage:
@@ -14,7 +21,6 @@ Exit codes:
     3  Both failures and feedback
     4  Timed out waiting for checks
 """
-
 import json
 import subprocess
 import sys

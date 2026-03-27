@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Abandon the currently claimed issue for this worktree.
 
 Releases the local claim so another worktree can pick it up.
@@ -11,7 +18,6 @@ Exit codes:
     0  Claim released successfully
     1  No active claim found for this worktree
 """
-
 import sys
 
 from agent_issues.local_claims import release_current_owner_claims, resolve_issue_stem_for_key

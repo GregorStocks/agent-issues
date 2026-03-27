@@ -1,4 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
+#!/bin/sh
+""":"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --project "$SCRIPT_DIR/.." python3 "$0" "$@"
+fi
+exec python3 "$0" "$@"
+":"""
 """Claim an issue using the shared local claim store.
 
 Usage:
@@ -11,7 +18,6 @@ Exit codes:
     1  Already claimed by another worktree / no current claim
     2  Bad input / branch already tied to a different claimed issue
 """
-
 import subprocess
 import sys
 from pathlib import Path
