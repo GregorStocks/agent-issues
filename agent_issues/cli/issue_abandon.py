@@ -1,21 +1,9 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
-"""Abandon the currently claimed issue for this worktree.
-
-Releases the local claim so another worktree can pick it up.
-Does not delete the issue file or any branches.
-
-Usage:
-    issue-abandon
-
-Exit codes:
-    0  Claim released successfully
-    1  No active claim found for this worktree
-"""
+"""Abandon the currently claimed issue for this worktree."""
 
 import sys
+from pathlib import Path
 
 from agent_issues.local_claims import release_current_owner_claims, resolve_issue_stem_for_key
-from pathlib import Path
 
 ISSUES_DIR = Path("issues")
 ISSUE_NAMESPACE = "issues"
@@ -30,7 +18,3 @@ def main() -> None:
     for record in released:
         stem = resolve_issue_stem_for_key(ISSUES_DIR, record.key) or record.key
         print(f"Abandoned: {stem}")
-
-
-if __name__ == "__main__":
-    main()

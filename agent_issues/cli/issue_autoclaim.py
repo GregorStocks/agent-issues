@@ -1,29 +1,11 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
-"""Claim an issue — either a specific one or the highest-priority unclaimed one.
-
-Merges origin/<default-branch> first, then either claims the named issue or
-atomically picks the highest-priority locally unclaimed non-blocked issue.
-
-Usage:
-    issue-autoclaim                  Auto-pick highest priority issue
-    issue-autoclaim <issue-name>     Claim a specific issue (bypasses blocked)
-
-Exit codes:
-    0  Claimed successfully
-    1  No claimable issues available / named issue already claimed
-    2  Bad input
-"""
+"""Claim an issue automatically or by explicit name."""
 
 import subprocess
 import sys
 from pathlib import Path
 
-from agent_issues.issue_files import (
-    issue_path,
-    issue_stem,
-    iter_issue_files,
-    load_issue,
-)
+from agent_issues.cli.common import default_branch
+from agent_issues.issue_files import issue_path, issue_stem, iter_issue_files, load_issue
 from agent_issues.local_claims import (
     ClaimConflictError,
     canonical_issue_key,
@@ -38,19 +20,8 @@ ISSUES_DIR = Path("issues")
 ISSUE_NAMESPACE = "issues"
 
 
-def _default_branch() -> str:
-    result = subprocess.run(
-        ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    return "main"
-
-
 def merge_default_branch() -> None:
-    branch = _default_branch()
+    branch = default_branch()
     subprocess.run(["git", "fetch", "origin"], check=True)
     subprocess.run(["git", "merge", f"origin/{branch}", "--no-edit"], check=True)
 
@@ -103,7 +74,7 @@ def _refuse_if_already_claiming(*, target_key: str | None) -> None:
 
 def _ensure_not_on_default_branch() -> None:
     context = current_worktree_context()
-    default = _default_branch()
+    default = default_branch()
     if context.branch != default:
         return
     print(
@@ -181,7 +152,3 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Claimed: {_claimed_issue_stem(records[0].key)}")
-
-
-if __name__ == "__main__":
-    main()

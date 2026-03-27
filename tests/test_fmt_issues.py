@@ -1,26 +1,10 @@
-"""Tests for bin/issue-fmt."""
+"""Tests for agent_issues.cli.issue_fmt."""
 
-import importlib.machinery
-import importlib.util
 import json
 from pathlib import Path
 
+from agent_issues.cli import issue_fmt
 from agent_issues.json5_utils import dumps_json5
-
-BIN_DIR = Path(__file__).resolve().parent.parent / "bin"
-
-
-def _import_script(name: str):
-    path = BIN_DIR / name
-    loader = importlib.machinery.SourceFileLoader(name, str(path))
-    spec = importlib.util.spec_from_loader(name, loader, origin=str(path))
-    assert spec and spec.loader
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-issue_fmt = _import_script("issue-fmt")
 
 
 def _make_valid_issue() -> dict:

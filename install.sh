@@ -1,16 +1,24 @@
 #!/bin/bash
-# Install agent-issues: symlink skills into Claude Code and Codex skill directories.
+# Install agent-issues skills and CLI commands.
 #
 # Usage:
 #   ./install.sh
 #
-# After running, add the bin directory to your PATH:
-#   export PATH="$HOME/code/agent-issues/bin:$PATH"
+# This installs the Python CLI with `uv tool install --editable`, then links
+# the skills into Claude Code and Codex skill directories.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
+
+if ! command -v uv >/dev/null 2>&1; then
+    echo "Error: uv is required to install agent-issues." >&2
+    exit 1
+fi
+
+uv tool install --force --editable "$SCRIPT_DIR"
+UV_BIN_DIR="$(uv tool dir --bin)"
 
 # Claude Code global skills
 CLAUDE_SKILLS="$HOME/.claude/skills"
@@ -47,6 +55,11 @@ for skill_dir in "$SKILLS_DIR"/*/; do
 done
 
 echo ""
-echo "Skills installed. Add agent-issues to your PATH:"
+echo "Skills installed."
 echo ""
-echo "  export PATH=\"$SCRIPT_DIR/bin:\$PATH\""
+echo "CLI tools installed via uv."
+echo "Tool bin dir: $UV_BIN_DIR"
+echo ""
+echo "If the commands are not on your PATH yet, run:"
+echo ""
+echo "  uv tool update-shell"

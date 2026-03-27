@@ -1,18 +1,10 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
-"""Push, create/update a PR for the current branch, and mark it ready.
-
-Usage:
-    issue-finalize-pr --title "PR title" --body "PR body"
-
-Exit codes:
-    0  Success
-    1  No local issue claim found for the current worktree
-"""
+"""Push, create or update a PR for the current branch, and mark it ready."""
 
 import argparse
 import json
 import subprocess
 
+from agent_issues.cli.common import default_branch
 from agent_issues.local_claims import current_owner_claims
 
 ISSUE_NAMESPACE = "issues"
@@ -20,15 +12,6 @@ ISSUE_NAMESPACE = "issues"
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True)
-
-
-def _default_branch() -> str:
-    result = run(
-        ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    return "main"
 
 
 def _current_branch() -> str:
@@ -41,28 +24,14 @@ def _current_branch() -> str:
 
 def _open_branch_pr(branch: str) -> dict[str, object] | None:
     result = run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--head",
-            branch,
-            "--state",
-            "open",
-            "--json",
-            "number,isDraft",
-        ]
+        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number,isDraft"]
     )
     assert result.returncode == 0, f"gh pr list --head {branch} failed: {result.stderr}"
     prs = json.loads(result.stdout)
-    assert isinstance(prs, list), (
-        f"gh pr list returned non-list payload: {type(prs).__name__}"
-    )
+    assert isinstance(prs, list), f"gh pr list returned non-list payload: {type(prs).__name__}"
     if not prs:
         return None
-    assert len(prs) == 1, (
-        f"Expected at most one open PR for branch {branch}, got {len(prs)}"
-    )
+    assert len(prs) == 1, f"Expected at most one open PR for branch {branch}, got {len(prs)}"
     pr = prs[0]
     assert isinstance(pr, dict), f"gh pr list returned non-object PR entry: {pr!r}"
     return pr
@@ -81,39 +50,19 @@ def main() -> None:
     subprocess.run(["git", "push", "origin", "HEAD"], check=True)
 
     branch = _current_branch()
-    base = _default_branch()
+    base = default_branch()
     pr = _open_branch_pr(branch)
 
     if pr is None:
         subprocess.run(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--draft",
-                "--base",
-                base,
-                "--title",
-                args.title,
-                "--body",
-                args.body,
-            ],
+            ["gh", "pr", "create", "--draft", "--base", base, "--title", args.title, "--body", args.body],
             check=True,
         )
         pr = _open_branch_pr(branch)
         assert pr is not None, f"Open PR for {branch} not found after creation"
     else:
         subprocess.run(
-            [
-                "gh",
-                "pr",
-                "edit",
-                str(pr["number"]),
-                "--title",
-                args.title,
-                "--body",
-                args.body,
-            ],
+            ["gh", "pr", "edit", str(pr["number"]), "--title", args.title, "--body", args.body],
             check=True,
         )
 
@@ -121,7 +70,3 @@ def main() -> None:
         subprocess.run(["gh", "pr", "ready"], check=True)
 
     print(f"PR finalized: {args.title}")
-
-
-if __name__ == "__main__":
-    main()

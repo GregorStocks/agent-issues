@@ -1,21 +1,9 @@
-#!/usr/bin/env -S uv run --project ${HOME}/code/agent-issues python
-"""Claim an issue using the shared local claim store.
+"""Claim an issue using the shared local claim store."""
 
-Usage:
-    issue-claim <issue-filename>  Claim an issue
-    issue-claim --current         Print this worktree's claimed issue
-    issue-claim --list            List active claimed issues
-
-Exit codes:
-    0  Claimed successfully (or query succeeded)
-    1  Already claimed by another worktree / no current claim
-    2  Bad input / branch already tied to a different claimed issue
-"""
-
-import subprocess
 import sys
 from pathlib import Path
 
+from agent_issues.cli.common import default_branch
 from agent_issues.issue_files import issue_path, issue_stem, load_issue
 from agent_issues.local_claims import (
     ClaimConflictError,
@@ -31,17 +19,6 @@ ISSUES_DIR = Path("issues")
 ISSUE_NAMESPACE = "issues"
 
 
-def _default_branch() -> str:
-    result = subprocess.run(
-        ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0 and result.stdout.strip():
-        return result.stdout.strip()
-    return "main"
-
-
 def list_claimed() -> list[str]:
     return sorted(record.key for record in list_claims(ISSUE_NAMESPACE))
 
@@ -50,9 +27,7 @@ def current_claimed_issue_stem() -> str | None:
     claims = current_owner_claims(ISSUE_NAMESPACE)
     if not claims:
         return None
-    assert len(claims) == 1, (
-        f"Expected at most one issue claim for this worktree, got {claims}"
-    )
+    assert len(claims) == 1, f"Expected at most one issue claim for this worktree, got {claims}"
     resolved = resolve_issue_stem_for_key(ISSUES_DIR, claims[0].key)
     assert resolved is not None, (
         f"Current issue claim {claims[0].key!r} does not resolve to an issue file"
@@ -86,7 +61,7 @@ def main() -> None:
         sys.exit(2)
 
     context = current_worktree_context()
-    default = _default_branch()
+    default = default_branch()
     if context.branch == default:
         print(
             f"Error: can't claim an issue from {default} — switch to a feature branch first",
@@ -126,12 +101,6 @@ def main() -> None:
         sys.exit(1)
 
     resolved = current_claimed_issue_stem()
-    assert resolved is not None, (
-        "Issue claim succeeded but current claim could not be resolved"
-    )
+    assert resolved is not None, "Issue claim succeeded but current claim could not be resolved"
     print(f"Claimed {resolved}")
     print(f"Branch: {context.branch}")
-
-
-if __name__ == "__main__":
-    main()

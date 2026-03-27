@@ -39,7 +39,12 @@ Use real timestamps (the actual time you're creating the issue), not `00:00:00` 
 
 ## CLI Tools
 
-If [agent-issues](https://github.com/GregorStocks/agent-issues) is installed, these commands are available:
+Install the CLI with `uv tool install --editable /path/to/agent-issues`.
+
+If the tool executable directory is not already on your `PATH`, run `uv tool update-shell`
+or inspect it with `uv tool dir --bin`.
+
+Once installed, these commands are available:
 
 ### List all issues with priority
 
@@ -92,3 +97,7 @@ issue-watch-pr [<pr-number>]
 ```bash
 issue-lint [<project-root>]
 ```
+
+These commands are exposed through `[project.scripts]` entrypoints in
+`pyproject.toml`, so `uv` generates the platform-native launchers for macOS, Linux,
+and Windows.

@@ -8,6 +8,16 @@ dependencies = [
     "pytest>=8.0",
 ]
 
+[project.scripts]
+issue-abandon = "agent_issues.cli.issue_abandon:main"
+issue-autoclaim = "agent_issues.cli.issue_autoclaim:main"
+issue-claim = "agent_issues.cli.issue_claim:main"
+issue-finalize-pr = "agent_issues.cli.issue_finalize_pr:main"
+issue-fmt = "agent_issues.cli.issue_fmt:main"
+issue-lint = "agent_issues.cli.issue_lint:main"
+issue-query = "agent_issues.cli.issue_query:main"
+issue-watch-pr = "agent_issues.cli.issue_watch_pr:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
