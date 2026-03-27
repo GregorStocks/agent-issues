@@ -12,6 +12,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 
+# Install Python dependencies (creates .venv so bin/ scripts work)
+uv sync --project "$SCRIPT_DIR"
+
 # Claude Code global skills
 CLAUDE_SKILLS="$HOME/.claude/skills"
 mkdir -p "$CLAUDE_SKILLS"
