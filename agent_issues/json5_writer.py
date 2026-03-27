@@ -93,6 +93,14 @@ _CONT_END_RE = re.compile(
     r'("(?:,?)\s*)$',  # suffix – "[,]
 )
 
+# Key-value pair whose string value continues on the next line:
+#   <indent>"<key>": "<content>\n\
+_KV_STRING_CONT_RE = re.compile(
+    r'^(\s*"(?:[^"\\]|\\.)*":\s*")'  # prefix – indent + key + ': "'
+    r"(.*)"  # content – string body (greedy, backtracks for suffix)
+    r"(\\n\\)$",  # suffix – \n\ (paragraph break continuation)
+)
+
 
 def _wrap_long_lines(text: str, width: int) -> str:
     """Wrap long string-value lines using JSON5 line continuations."""
@@ -118,6 +126,8 @@ def _wrap_long_lines(text: str, width: int) -> str:
 def _wrap_kv_string(line: str, width: int) -> list[str]:
     """Wrap a key-value line whose value is a long string."""
     m = _KV_STRING_RE.match(line)
+    if not m:
+        m = _KV_STRING_CONT_RE.match(line)
     if not m:
         return [line]
     return _wrap_matched(m, width)

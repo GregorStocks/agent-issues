@@ -80,6 +80,17 @@ def test_wrap_with_multiline_string():
         assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
 
 
+def test_wrap_long_first_paragraph_in_multiline_string():
+    """A multiline string whose first paragraph exceeds wrap_width must wrap."""
+    para1 = "word " * 40  # ~200 chars – long first paragraph
+    para2 = "Short second paragraph."
+    obj = {"description": f"{para1.strip()}\n{para2}"}
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    for line in text.split("\n"):
+        assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
+
+
 def test_no_wrap_when_no_spaces():
     """A long string without spaces cannot be wrapped – must survive."""
     long_val = "x" * 200
