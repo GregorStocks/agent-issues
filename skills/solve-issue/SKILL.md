@@ -176,3 +176,4 @@ Not every quirk deserves a fix. For issues that seem one-in-a-million or where i
 
 - One issue per PR — keeps PRs small and reviewable
 - Don't chain multiple issues — after CI is green and feedback is addressed, stop
+- Never switch branches — work on whatever branch you're already on. The caller is responsible for putting you on the right branch before invoking this skill.
