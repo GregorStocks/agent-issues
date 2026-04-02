@@ -128,7 +128,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
     - If you merged the default branch after claiming, re-check whether the issue file was renamed (for example to add a priority prefix or `blocked-` prefix) and delete the renamed path that now exists on your branch.
     - After the file is deleted, `issue-claim --current` may stop working because it resolves the claim against issue files on disk. That does **not** mean the claim itself is gone. `issue-finalize-pr` reads the local claim store directly and still works; do not recreate the deleted issue file just to make `issue-claim --current` happy.
 
-11. **Document ALL issues you discover** during exploration, even if you're only fixing one. Future agents benefit from this documentation!
+11. **Document ALL issues you discover** during exploration, even if you're only fixing one. Future agents benefit from this documentation! Document them by filing new issues in issues/.
 
 12. Review the changed code for reuse, quality, and efficiency. Fix any issues found. If the repo has a `/simplify` skill, use it.
 
