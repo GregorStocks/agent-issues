@@ -8,6 +8,7 @@ import time
 POLL_INTERVAL = 30
 TIMEOUT = 1800
 STARTUP_GRACE = 120
+CODEX_REVIEW_WAIT = 600
 
 _PASS_BUCKETS = {"pass", "skipping"}
 
@@ -51,6 +52,18 @@ def should_stop_polling(checks: list[dict]) -> bool:
         if bucket not in _PASS_BUCKETS and bucket not in ("pending", None):
             return True
     return all(check.get("bucket") not in ("pending", None) for check in checks)
+
+
+def get_pr_reactions(pr: str, nwo: str) -> list[dict]:
+    """Fetch reactions on the PR body."""
+    result = run_gh("api", "--paginate", f"repos/{nwo}/issues/{pr}/reactions")
+    if result.returncode != 0:
+        return []
+    return json.loads(result.stdout) if result.stdout.strip() else []
+
+
+def has_reaction(reactions: list[dict], content: str) -> bool:
+    return any(r.get("content") == content for r in reactions)
 
 
 def get_review_feedback(pr: str, nwo: str) -> list[str]:
@@ -145,6 +158,47 @@ def main() -> None:
         sys.exit(1)
 
     failed = [check for check in checks if check.get("bucket") not in _PASS_BUCKETS | {"pending", None}]
+
+    # Wait for potential codex review (eyes emoji on PR) if CI passed
+    if not failed:
+        eyes_seen = False
+        # Poll until at least CODEX_REVIEW_WAIT elapsed since start
+        while time.monotonic() - start < CODEX_REVIEW_WAIT:
+            reactions = get_pr_reactions(pr, nwo)
+            if has_reaction(reactions, "eyes") or has_reaction(reactions, "+1"):
+                eyes_seen = has_reaction(reactions, "eyes")
+                break
+            remaining = max(0, int((CODEX_REVIEW_WAIT - (time.monotonic() - start)) // 60))
+            print(f"  Waiting for codex review... ({remaining}m remaining)", flush=True)
+            time.sleep(POLL_INTERVAL)
+        else:
+            # Final check after wait expires
+            reactions = get_pr_reactions(pr, nwo)
+            eyes_seen = has_reaction(reactions, "eyes")
+
+        if eyes_seen:
+            print("\nCodex is reviewing (eyes). Waiting for verdict...", flush=True)
+            baseline_feedback = get_review_feedback(pr, nwo)
+            while True:
+                elapsed = time.monotonic() - start
+                if elapsed > TIMEOUT:
+                    print(f"\nTimed out waiting for codex review after {TIMEOUT}s.", flush=True)
+                    sys.exit(4)
+
+                reactions = get_pr_reactions(pr, nwo)
+                if has_reaction(reactions, "+1"):
+                    print("Codex approved (thumbs up).", flush=True)
+                    break
+
+                current_feedback = get_review_feedback(pr, nwo)
+                if len(current_feedback) > len(baseline_feedback):
+                    print("Codex left review comments.", flush=True)
+                    break
+
+                mins = int(elapsed // 60)
+                print(f"  [{mins}m] Codex still reviewing...", flush=True)
+                time.sleep(POLL_INTERVAL)
+
     feedback = get_review_feedback(pr, nwo)
 
     exit_code = 0
