@@ -75,7 +75,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
 8. **Report the PR URL** to the user.
 
-9. **Watch CI and address feedback.** Run the watcher — it polls every 30s, returns as soon as any check fails or all pass (up to 30 min):
+9. **Watch CI, codex review, and address feedback.** Run the watcher — it polls every 30s, waits for CI checks to finish, then waits at least 10 minutes total for a codex review (👀 emoji on the PR). If codex starts reviewing, it waits for either a 👍 (approval) or review comments before returning. Overall timeout is 30 min:
 
    ```bash
    issue-watch-pr
@@ -83,7 +83,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
    Consult the local `create-pr-local` skill if it specifies a different watcher command.
 
-   - **Exit 0** (all green, no comments): Done.
+   - **Exit 0** (all green, no comments, codex approved or absent): Done.
    - **Exit 1** (CI failed): The output lists failed checks with links. Investigate with `gh run view <run-id> --log-failed` (extract the run ID from the check URL). Fix the root cause, push, update the PR, and re-run the watcher.
    - **Exit 2** (review feedback): The output lists top-level reviews, general comments, and inline diff comments. For inline comments, read the full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each one, push, update the PR, and re-run the watcher.
    - **Exit 3** (both): Address both, then push and re-watch.
