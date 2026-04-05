@@ -89,7 +89,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
    - **Exit 3** (both): Address both, then push and re-watch.
    - **Exit 4** (timeout): Re-run this step.
 
-   **Cap at 3 fix iterations.** If after 3 rounds CI still fails or new feedback keeps arriving, report the situation to the user and stop.
+   **Cap at 10 fix iterations.** If after 10 rounds CI still fails or new feedback keeps arriving, report the situation to the user and stop.
 
 ## Guidelines
 

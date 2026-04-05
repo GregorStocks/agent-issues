@@ -127,6 +127,9 @@ def main() -> None:
     nwo = get_repo_nwo()
     print(f"Watching PR #{pr}...", flush=True)
 
+    # Snapshot existing feedback so we only report new comments/reviews
+    baseline_feedback = set(get_review_feedback(pr, nwo))
+
     start = time.monotonic()
     checks = get_checks(pr)
     while not checks:
@@ -178,7 +181,7 @@ def main() -> None:
 
         if eyes_seen:
             print("\nCodex is reviewing (eyes). Waiting for verdict...", flush=True)
-            baseline_feedback = get_review_feedback(pr, nwo)
+            codex_baseline = get_review_feedback(pr, nwo)
             while True:
                 elapsed = time.monotonic() - start
                 if elapsed > TIMEOUT:
@@ -191,7 +194,7 @@ def main() -> None:
                     break
 
                 current_feedback = get_review_feedback(pr, nwo)
-                if len(current_feedback) > len(baseline_feedback):
+                if len(current_feedback) > len(codex_baseline):
                     print("Codex left review comments.", flush=True)
                     break
 
@@ -199,7 +202,8 @@ def main() -> None:
                 print(f"  [{mins}m] Codex still reviewing...", flush=True)
                 time.sleep(POLL_INTERVAL)
 
-    feedback = get_review_feedback(pr, nwo)
+    all_feedback = get_review_feedback(pr, nwo)
+    feedback = [f for f in all_feedback if f not in baseline_feedback]
 
     exit_code = 0
 
@@ -211,7 +215,7 @@ def main() -> None:
 
     if feedback:
         exit_code |= 2
-        print(f"\n{len(feedback)} review comment(s):")
+        print(f"\n{len(feedback)} new review comment(s):")
         for item in feedback:
             print(f"  {item}")
 
