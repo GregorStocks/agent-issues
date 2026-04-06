@@ -37,13 +37,15 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
    Fix any merge conflicts before proceeding. Use `--no-edit` so repo merge settings do not drop you into an interactive editor mid-workflow.
 
-4. **Run pre-validation steps** from the local skill if it exists (e.g., regenerate stale test fixtures, build generated code). Skip this step if no local skill is present.
+4. **Format issues.** Run `issue-fmt` to auto-format issue files before validation.
 
-5. **Run the validation suite.** Consult the local `create-pr-local` skill for the specific commands. If no local skill exists, look for `Makefile` targets like `make check`, `make test`, or `make lint`. Fix any failures before proceeding. Do not create a PR with failing checks.
+5. **Run pre-validation steps** from the local skill if it exists (e.g., regenerate stale test fixtures, build generated code). Skip this step if no local skill is present.
+
+6. **Run the validation suite.** Consult the local `create-pr-local` skill for the specific commands. If no local skill exists, look for `Makefile` targets like `make check`, `make test`, or `make lint`. Fix any failures before proceeding. Do not create a PR with failing checks.
 
    After validation, run `git status` again before pushing. Build and test commands can dirty tracked files. Commit intentional artifacts or clean incidental churn before you open the PR.
 
-6. **Write the PR title and body.** The PR description must explain **why** these changes exist, not just what they do. A reviewer can read the diff to see *what* changed — the PR body should tell them *why* it changed, what problem it solves, and any context they'd need to evaluate the approach.
+7. **Write the PR title and body.** The PR description must explain **why** these changes exist, not just what they do. A reviewer can read the diff to see *what* changed — the PR body should tell them *why* it changed, what problem it solves, and any context they'd need to evaluate the approach.
 
    Bad (just restates the diff):
    > - Add `timeout` parameter to `fetch_data()`
@@ -57,7 +59,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
    The summary bullets should be a mix of what and why — lead with the motivation, then mention key implementation details only when they're non-obvious.
 
-7. **Push and create the PR:**
+8. **Push and create the PR:**
 
    ```bash
    git push -u origin HEAD
@@ -73,9 +75,9 @@ If either exists, read it and follow its instructions alongside this workflow. T
    )"
    ```
 
-8. **Report the PR URL** to the user.
+9. **Report the PR URL** to the user.
 
-9. **Watch CI, codex review, and address feedback.** Run the watcher — it polls every 30s, waits for CI checks to finish, then waits at least 10 minutes total for a codex review (👀 emoji on the PR). If codex starts reviewing, it waits for either a 👍 (approval) or review comments before returning. Overall timeout is 30 min:
+10. **Watch CI, codex review, and address feedback.** Run the watcher — it polls every 30s, waits for CI checks to finish, then waits at least 10 minutes total for a codex review (👀 emoji on the PR). If codex starts reviewing, it waits for either a 👍 (approval) or review comments before returning. Overall timeout is 30 min:
 
    ```bash
    issue-watch-pr
