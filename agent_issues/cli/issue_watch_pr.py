@@ -133,6 +133,12 @@ def main() -> None:
     start = time.monotonic()
     checks = get_checks(pr)
     while not checks:
+        if check_merge_conflict(pr):
+            print(
+                "\nPR has a merge conflict — CI will not run until conflicts are resolved.",
+                flush=True,
+            )
+            sys.exit(1)
         elapsed = time.monotonic() - start
         assert elapsed <= STARTUP_GRACE, f"No CI checks found for PR #{pr} after {STARTUP_GRACE}s"
         print("Waiting for checks to start...", flush=True)

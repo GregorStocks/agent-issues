@@ -149,7 +149,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
     ```
 
     - **Exit 0** (all green, no comments, codex approved or absent): Done — leave remaining issues for the next agent.
-    - **Exit 1** (CI failed): The output lists failed checks with links. Investigate with `gh run view <run-id> --log-failed` (extract the run ID from the check URL). Fix the root cause, push, update the PR, and re-run the watcher.
+    - **Exit 1** (CI failed or merge conflict): If the output says the PR has a merge conflict, merge the default branch (`git merge --no-edit origin/<default-branch>`), resolve conflicts, push, and re-run the watcher. Otherwise, the output lists failed checks with links — investigate with `gh run view <run-id> --log-failed` (extract the run ID from the check URL). Fix the root cause, push, update the PR, and re-run the watcher.
     - **Exit 2** (review feedback): The output lists top-level reviews, general comments, and inline diff comments. For inline comments, read the full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each one, push, update the PR, and re-run the watcher.
     - **Exit 3** (both): Address both, then push and re-watch.
     - **Exit 4** (timeout): Re-run this step.
