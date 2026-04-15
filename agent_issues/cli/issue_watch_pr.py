@@ -29,6 +29,28 @@ def get_repo_nwo() -> str:
     return result.stdout.strip()
 
 
+def get_pr_lifecycle_state(pr: str) -> str:
+    result = run_gh("pr", "view", pr, "--json", "state,mergedAt")
+    if result.returncode != 0:
+        return "open"
+    data = json.loads(result.stdout) if result.stdout.strip() else {}
+    if data.get("mergedAt"):
+        return "merged"
+    if data.get("state") == "CLOSED":
+        return "closed"
+    return "open"
+
+
+def exit_if_pr_finished(pr: str) -> None:
+    state = get_pr_lifecycle_state(pr)
+    if state == "merged":
+        print("\nPR has been merged.", flush=True)
+        sys.exit(0)
+    if state == "closed":
+        print("\nPR was closed without merging.", flush=True)
+        sys.exit(1)
+
+
 def check_merge_conflict(pr: str) -> bool:
     result = run_gh("pr", "view", pr, "--json", "mergeable", "--jq", ".mergeable")
     if result.returncode != 0:
@@ -126,6 +148,7 @@ def main() -> None:
     pr = sys.argv[1] if len(sys.argv) > 1 else get_pr_number()
     nwo = get_repo_nwo()
     print(f"Watching PR #{pr}...", flush=True)
+    exit_if_pr_finished(pr)
 
     # Snapshot existing feedback so we only report new comments/reviews
     baseline_feedback = set(get_review_feedback(pr, nwo))
@@ -133,6 +156,7 @@ def main() -> None:
     start = time.monotonic()
     checks = get_checks(pr)
     while not checks:
+        exit_if_pr_finished(pr)
         if check_merge_conflict(pr):
             print(
                 "\nPR has a merge conflict — CI will not run until conflicts are resolved.",
@@ -152,6 +176,7 @@ def main() -> None:
             print(f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}", flush=True)
             sys.exit(4)
 
+        exit_if_pr_finished(pr)
         if check_merge_conflict(pr):
             print("\nPR has a merge conflict with the base branch. Merge or rebase to resolve.", flush=True)
             sys.exit(1)
@@ -173,6 +198,7 @@ def main() -> None:
         eyes_seen = False
         # Poll until at least CODEX_REVIEW_WAIT elapsed since start
         while time.monotonic() - start < CODEX_REVIEW_WAIT:
+            exit_if_pr_finished(pr)
             reactions = get_pr_reactions(pr, nwo)
             if has_reaction(reactions, "eyes") or has_reaction(reactions, "+1"):
                 eyes_seen = has_reaction(reactions, "eyes")
@@ -194,6 +220,7 @@ def main() -> None:
                     print(f"\nTimed out waiting for codex review after {TIMEOUT}s.", flush=True)
                     sys.exit(4)
 
+                exit_if_pr_finished(pr)
                 reactions = get_pr_reactions(pr, nwo)
                 if has_reaction(reactions, "+1"):
                     print("Codex approved (thumbs up).", flush=True)
