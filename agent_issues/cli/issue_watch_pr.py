@@ -4,11 +4,12 @@ import json
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 
 POLL_INTERVAL = 30
+COMMENT_GRACE = 20
+NO_EYES_TIMEOUT = 15 * 60
 TIMEOUT = 1800
-STARTUP_GRACE = 120
-CODEX_REVIEW_WAIT = 600
 
 _PASS_BUCKETS = {"pass", "skipping"}
 
@@ -66,16 +67,6 @@ def get_checks(pr: str) -> list[dict]:
     return json.loads(result.stdout) if result.stdout.strip() else []
 
 
-def should_stop_polling(checks: list[dict]) -> bool:
-    if not checks:
-        return False
-    for check in checks:
-        bucket = check.get("bucket")
-        if bucket not in _PASS_BUCKETS and bucket not in ("pending", None):
-            return True
-    return all(check.get("bucket") not in ("pending", None) for check in checks)
-
-
 def get_pr_reactions(pr: str, nwo: str) -> list[dict]:
     """Fetch reactions on the PR body."""
     result = run_gh("api", "--paginate", f"repos/{nwo}/issues/{pr}/reactions")
@@ -88,13 +79,21 @@ def has_reaction(reactions: list[dict], content: str) -> bool:
     return any(r.get("content") == content for r in reactions)
 
 
-def get_review_feedback(pr: str, nwo: str) -> list[str]:
+def _parse_ts(ts: str) -> datetime:
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
+def get_review_feedback(pr: str, nwo: str) -> list[dict]:
+    """Return non-author review/comment feedback with timestamps.
+
+    Each item: {"formatted": str, "created_at": datetime}.
+    """
     result = run_gh("pr", "view", pr, "--json", "author,reviews,comments")
     assert result.returncode == 0, f"Failed to fetch PR details: {result.stderr}"
     data = json.loads(result.stdout)
     pr_author = data["author"]["login"]
 
-    feedback = []
+    feedback: list[dict] = []
     latest_review: dict[str, dict] = {}
     reviews = data.get("reviews") or []
     for review in reviews:
@@ -106,10 +105,13 @@ def get_review_feedback(pr: str, nwo: str) -> list[str]:
             continue
         body = review.get("body")
         body = body.strip() if body else None
+        ts = _parse_ts(review["submittedAt"])
         if body:
-            feedback.append(f"[{state}] @{author}: {body}")
+            feedback.append({"formatted": f"[{state}] @{author}: {body}", "created_at": ts})
         else:
-            feedback.append(f"[{state}] @{author} (see inline comments)")
+            feedback.append(
+                {"formatted": f"[{state}] @{author} (see inline comments)", "created_at": ts}
+            )
 
     comments = data.get("comments") or []
     for comment in comments:
@@ -118,30 +120,49 @@ def get_review_feedback(pr: str, nwo: str) -> list[str]:
             continue
         body = comment.get("body")
         body = body.strip() if body else None
-        if body:
-            feedback.append(f"[COMMENT] @{author}: {body}")
+        if not body:
+            continue
+        ts = _parse_ts(comment["createdAt"])
+        feedback.append({"formatted": f"[COMMENT] @{author}: {body}", "created_at": ts})
 
     inline_result = run_gh(
         "api",
         "--paginate",
         f"repos/{nwo}/pulls/{pr}/comments",
         "--jq",
-        ".[] | [.user.login, .path, (.line | tostring), .body] | @tsv",
+        ".[] | [.user.login, .path, (.line | tostring), .body, .created_at] | @tsv",
     )
     assert inline_result.returncode == 0, (
         f"Failed to fetch inline comments: {inline_result.stderr}"
     )
     if inline_result.stdout.strip():
         for line in inline_result.stdout.strip().split("\n"):
-            parts = line.split("\t", 3)
-            if len(parts) < 4:
+            parts = line.split("\t", 4)
+            if len(parts) < 5:
                 continue
-            author, path, line_no, body = parts
+            author, path, line_no, body, created_at = parts
             if author == pr_author:
                 continue
-            feedback.append(f"[INLINE] @{author} on {path}:{line_no}: {body.strip()}")
+            feedback.append(
+                {
+                    "formatted": f"[INLINE] @{author} on {path}:{line_no}: {body.strip()}",
+                    "created_at": _parse_ts(created_at),
+                }
+            )
 
     return feedback
+
+
+def _print_failed(failed: list[dict]) -> None:
+    print(f"\n{len(failed)} check(s) FAILED:")
+    for check in failed:
+        print(f"  - {check['name']} ({check.get('bucket')}): {check.get('link', 'no link')}")
+
+
+def _print_feedback(items: list[dict]) -> None:
+    print(f"\n{len(items)} new review comment(s):")
+    for item in items:
+        print(f"  {item['formatted']}")
 
 
 def main() -> None:
@@ -150,114 +171,105 @@ def main() -> None:
     print(f"Watching PR #{pr}...", flush=True)
     exit_if_pr_finished(pr)
 
-    # Snapshot existing feedback so we only report new comments/reviews
-    baseline_feedback = set(get_review_feedback(pr, nwo))
+    baseline_feedback = {f["formatted"] for f in get_review_feedback(pr, nwo)}
 
     start = time.monotonic()
-    checks = get_checks(pr)
-    while not checks:
+    eyes_seen = False
+
+    while True:
         exit_if_pr_finished(pr)
+
+        # (d) merge conflict
         if check_merge_conflict(pr):
             print(
-                "\nPR has a merge conflict — CI will not run until conflicts are resolved.",
+                "\nPR has a merge conflict with the base branch. Merge or rebase to resolve.",
                 flush=True,
             )
             sys.exit(1)
-        elapsed = time.monotonic() - start
-        assert elapsed <= STARTUP_GRACE, f"No CI checks found for PR #{pr} after {STARTUP_GRACE}s"
-        print("Waiting for checks to start...", flush=True)
-        time.sleep(POLL_INTERVAL)
-        checks = get_checks(pr)
 
-    while not should_stop_polling(checks):
+        checks = get_checks(pr)
         elapsed = time.monotonic() - start
+
         if elapsed > TIMEOUT:
-            pending = [check["name"] for check in checks if check.get("bucket") == "pending"]
-            print(f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}", flush=True)
+            pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
+            print(
+                f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
+                flush=True,
+            )
             sys.exit(4)
 
-        exit_if_pr_finished(pr)
-        if check_merge_conflict(pr):
-            print("\nPR has a merge conflict with the base branch. Merge or rebase to resolve.", flush=True)
+        # (a) any check failed
+        failed = [
+            c for c in checks if c.get("bucket") not in _PASS_BUCKETS | {"pending", None}
+        ]
+        if failed:
+            _print_failed(failed)
             sys.exit(1)
 
-        pending = [check["name"] for check in checks if check.get("bucket") == "pending"]
-        mins = int(elapsed // 60)
-        print(f"  [{mins}m] {len(pending)} pending: {', '.join(pending[:5])}", flush=True)
-        time.sleep(POLL_INTERVAL)
-        checks = get_checks(pr)
+        reactions = get_pr_reactions(pr, nwo)
+        if has_reaction(reactions, "eyes"):
+            eyes_seen = True
 
-    if check_merge_conflict(pr):
-        print("\nPR has a merge conflict with the base branch. Merge or rebase to resolve.", flush=True)
-        sys.exit(1)
+        all_feedback = get_review_feedback(pr, nwo)
+        new_feedback = [f for f in all_feedback if f["formatted"] not in baseline_feedback]
 
-    failed = [check for check in checks if check.get("bucket") not in _PASS_BUCKETS | {"pending", None}]
+        # (b) new feedback whose oldest item is >= 20s old
+        if new_feedback:
+            oldest = min(f["created_at"] for f in new_feedback)
+            age = (datetime.now(timezone.utc) - oldest).total_seconds()
+            if age >= COMMENT_GRACE:
+                _print_feedback(new_feedback)
+                sys.exit(2)
 
-    # Wait for potential codex review (eyes emoji on PR) if CI passed
-    if not failed:
-        eyes_seen = False
-        # Poll until at least CODEX_REVIEW_WAIT elapsed since start
-        while time.monotonic() - start < CODEX_REVIEW_WAIT:
-            exit_if_pr_finished(pr)
-            reactions = get_pr_reactions(pr, nwo)
-            if has_reaction(reactions, "eyes") or has_reaction(reactions, "+1"):
-                eyes_seen = has_reaction(reactions, "eyes")
-                break
-            remaining = max(0, int((CODEX_REVIEW_WAIT - (time.monotonic() - start)) // 60))
-            print(f"  Waiting for codex review... ({remaining}m remaining)", flush=True)
-            time.sleep(POLL_INTERVAL)
-        else:
-            # Final check after wait expires
-            reactions = get_pr_reactions(pr, nwo)
-            eyes_seen = has_reaction(reactions, "eyes")
+        # (c) 15 min elapsed and codex never started reviewing
+        if elapsed >= NO_EYES_TIMEOUT and not eyes_seen:
+            mins = NO_EYES_TIMEOUT // 60
+            pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
+            if pending:
+                print(
+                    f"\nNo codex review after {mins} min. "
+                    f"CI still has {len(pending)} pending check(s): {', '.join(pending)}",
+                    flush=True,
+                )
+            elif not checks:
+                print(f"\nNo codex review after {mins} min. No CI checks detected.", flush=True)
+            else:
+                passed = [c for c in checks if c.get("bucket") == "pass"]
+                skipped = [c for c in checks if c.get("bucket") == "skipping"]
+                print(
+                    f"\nNo codex review after {mins} min. "
+                    f"All checks passed ({len(passed)} passed, {len(skipped)} skipped). "
+                    f"No review feedback.",
+                    flush=True,
+                )
+            sys.exit(0)
 
-        if eyes_seen:
-            print("\nCodex is reviewing (eyes). Waiting for verdict...", flush=True)
-            codex_baseline = get_review_feedback(pr, nwo)
-            while True:
-                elapsed = time.monotonic() - start
-                if elapsed > TIMEOUT:
-                    print(f"\nTimed out waiting for codex review after {TIMEOUT}s.", flush=True)
-                    sys.exit(4)
-
-                exit_if_pr_finished(pr)
-                reactions = get_pr_reactions(pr, nwo)
-                if has_reaction(reactions, "+1"):
-                    print("Codex approved (thumbs up).", flush=True)
-                    break
-
-                current_feedback = get_review_feedback(pr, nwo)
-                if len(current_feedback) > len(codex_baseline):
-                    print("Codex left review comments.", flush=True)
-                    break
-
-                mins = int(elapsed // 60)
-                print(f"  [{mins}m] Codex still reviewing...", flush=True)
-                time.sleep(POLL_INTERVAL)
-
-    all_feedback = get_review_feedback(pr, nwo)
-    feedback = [f for f in all_feedback if f not in baseline_feedback]
-
-    exit_code = 0
-
-    if failed:
-        exit_code |= 1
-        print(f"\n{len(failed)} check(s) FAILED:")
-        for check in failed:
-            print(f"  - {check['name']} ({check.get('bucket')}): {check.get('link', 'no link')}")
-
-    if feedback:
-        exit_code |= 2
-        print(f"\n{len(feedback)} new review comment(s):")
-        for item in feedback:
-            print(f"  {item}")
-
-    if exit_code == 0:
-        passed = [check for check in checks if check.get("bucket") == "pass"]
-        skipped = [check for check in checks if check.get("bucket") == "skipping"]
-        print(
-            f"\nAll checks passed ({len(passed)} passed, {len(skipped)} skipped). No review feedback.",
-            flush=True,
+        # Natural success: CI all passing and codex approved
+        all_checks_pass = bool(checks) and all(
+            c.get("bucket") in _PASS_BUCKETS for c in checks
         )
+        if all_checks_pass and has_reaction(reactions, "+1"):
+            passed = [c for c in checks if c.get("bucket") == "pass"]
+            skipped = [c for c in checks if c.get("bucket") == "skipping"]
+            print(
+                f"\nAll checks passed ({len(passed)} passed, {len(skipped)} skipped). "
+                f"Codex approved (thumbs up). No review feedback.",
+                flush=True,
+            )
+            sys.exit(0)
 
-    sys.exit(exit_code)
+        pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
+        mins = int(elapsed // 60)
+        if pending:
+            print(
+                f"  [{mins}m] {len(pending)} check(s) pending: {', '.join(pending[:5])}",
+                flush=True,
+            )
+        elif not checks:
+            print(f"  [{mins}m] Waiting for checks to start...", flush=True)
+        elif eyes_seen:
+            print(f"  [{mins}m] CI done; codex reviewing...", flush=True)
+        else:
+            print(f"  [{mins}m] CI done; waiting for codex...", flush=True)
+
+        time.sleep(POLL_INTERVAL)
