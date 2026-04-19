@@ -12,6 +12,8 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def _default_branch() -> str:
+    # Duplicates common.default_branch() — kept local so every subprocess call in
+    # this module flows through _run, which is the single test seam for mocking.
     result = _run(
         ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
     )
