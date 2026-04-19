@@ -59,11 +59,10 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
    The summary bullets should be a mix of what and why — lead with the motivation, then mention key implementation details only when they're non-obvious.
 
-8. **Push and create the PR:**
+8. **Submit the PR.** Run `agent-submit` — it pushes HEAD, creates or updates the PR with the title/body you provide, and runs the CI watcher end-to-end:
 
    ```bash
-   git push -u origin HEAD
-   gh pr create --title "<concise title>" --body "$(cat <<'EOF'
+   agent-submit --title "<concise title>" --body "$(cat <<'EOF'
    ## Summary
    <2-5 bullets mixing why and what>
 
@@ -75,23 +74,17 @@ If either exists, read it and follow its instructions alongside this workflow. T
    )"
    ```
 
-9. **Report the PR URL** to the user.
+   `agent-submit` exits with one of these codes:
 
-10. **Watch CI, codex review, and address feedback.** Run the watcher — it polls every 30s, waits for CI checks to finish, then waits at least 10 minutes total for a codex review (👀 emoji on the PR). If codex starts reviewing, it waits for either a 👍 (approval) or review comments before returning. Overall timeout is 30 min:
+   | Code  | Meaning                                                                                   |
+   |-------|-------------------------------------------------------------------------------------------|
+   | 0     | All clean. Done.                                                                          |
+   | 1     | CI failed or merge conflict. If merge conflict, merge the default branch and resolve. Otherwise use `gh run view <run-id> --log-failed` (ID from the printed link), fix the root cause, commit, then re-run `agent-submit`. |
+   | 2     | Review feedback arrived. Read the printed feedback; for inline comments fetch full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each, commit, re-run. |
+   | 4     | Watcher timed out — **terminal**. Do not re-run automatically; stop and wait for the user. |
+   | 10+   | Preflight failed (on default branch, dirty working tree, not a git repo, etc.). Fix and re-run. |
 
-   ```bash
-   issue-watch-pr
-   ```
-
-   Consult the local `create-pr-local` skill if it specifies a different watcher command.
-
-   - **Exit 0** (all green, no comments, codex approved or absent): Done.
-   - **Exit 1** (CI failed or merge conflict): If the output says the PR has a merge conflict, merge the default branch (`git merge --no-edit origin/<default-branch>`), resolve conflicts, push, and re-run the watcher. Otherwise, the output lists failed checks with links — investigate with `gh run view <run-id> --log-failed` (extract the run ID from the check URL). Fix the root cause, push, update the PR, and re-run the watcher.
-   - **Exit 2** (review feedback): The output lists top-level reviews, general comments, and inline diff comments. For inline comments, read the full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each one, push, update the PR, and re-run the watcher.
-   - **Exit 3** (both): Address both, then push and re-watch.
-   - **Exit 4** (timeout): Re-run this step.
-
-   **Cap at 10 fix iterations.** If after 10 rounds CI still fails or new feedback keeps arriving, report the situation to the user and stop.
+   **Cap at 10 fix-and-resubmit iterations.** If after 10 rounds CI still fails or new feedback keeps arriving, report the situation to the user and stop.
 
 ## Guidelines
 
