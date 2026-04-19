@@ -140,3 +140,77 @@ def test_upsert_pr_aborts_when_multiple_open_prs(capsys) -> None:
         )
     assert exc.value.code == 10
     assert "more than one" in capsys.readouterr().out.lower()
+
+
+def test_next_step_footer_for_exit_1(capsys) -> None:
+    agent_submit._print_next_step(1)
+    out = capsys.readouterr().out
+    assert "CI failed" in out
+    assert "agent-submit" in out
+
+
+def test_next_step_footer_for_exit_2(capsys) -> None:
+    agent_submit._print_next_step(2)
+    assert "Review feedback" in capsys.readouterr().out
+
+
+def test_next_step_footer_for_exit_3(capsys) -> None:
+    agent_submit._print_next_step(3)
+    out = capsys.readouterr().out
+    assert "Both" in out or "both" in out
+
+
+def test_next_step_footer_for_exit_4(capsys) -> None:
+    agent_submit._print_next_step(4)
+    out = capsys.readouterr().out
+    assert "timed out" in out.lower()
+    assert "wait for the user" in out.lower()
+
+
+def test_next_step_footer_silent_on_exit_0(capsys) -> None:
+    agent_submit._print_next_step(0)
+    assert capsys.readouterr().out == ""
+
+
+def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
+    from agent_issues.cli import issue_watch_pr
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_push", return_value=0),
+        patch.object(agent_submit, "upsert_pr", return_value="42"),
+        patch.object(issue_watch_pr, "run", return_value=2) as watcher_mock,
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+    assert exc.value.code == 2
+    watcher_mock.assert_called_once_with(pr="42")
+
+
+def test_main_exits_early_on_preflight_failure() -> None:
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.object(agent_submit, "preflight", return_value=10),
+        patch.object(agent_submit, "_push") as push_mock,
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+    assert exc.value.code == 10
+    push_mock.assert_not_called()
+
+
+def test_main_exits_on_push_failure_without_upserting() -> None:
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_push", return_value=128),
+        patch.object(agent_submit, "upsert_pr") as upsert_mock,
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+    assert exc.value.code == 128
+    upsert_mock.assert_not_called()

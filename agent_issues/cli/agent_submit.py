@@ -6,6 +6,8 @@ import subprocess
 import sys
 from typing import Sequence
 
+from agent_issues.cli import issue_watch_pr
+
 EXIT_PREFLIGHT = 10
 
 
@@ -99,6 +101,46 @@ def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str
     return pr_number
 
 
+def _current_branch() -> str:
+    result = _run(["git", "branch", "--show-current"])
+    assert result.returncode == 0, f"git branch --show-current failed: {result.stderr}"
+    branch = result.stdout.strip()
+    assert branch, "Expected non-empty current branch"
+    return branch
+
+
+def _push() -> int:
+    """Push HEAD to origin. Returns git's exit code."""
+    return subprocess.run(["git", "push", "origin", "HEAD"]).returncode
+
+
+def _print_next_step(code: int) -> None:
+    if code == 0:
+        return
+    if code == 1:
+        print(
+            "\nNEXT STEP: CI failed or merge conflict. Investigate with `gh run view <run-id> "
+            "--log-failed`, fix, then re-run `agent-submit`.",
+            flush=True,
+        )
+    elif code == 2:
+        print(
+            "\nNEXT STEP: Review feedback received. Address the comments, then re-run `agent-submit`.",
+            flush=True,
+        )
+    elif code == 3:
+        print(
+            "\nNEXT STEP: Both CI failures and review feedback. Address both, then re-run `agent-submit`.",
+            flush=True,
+        )
+    elif code == 4:
+        print(
+            "\nNEXT STEP: Watcher timed out — likely all fine but didn't confirm. "
+            "Do not re-run automatically; stop and wait for the user.",
+            flush=True,
+        )
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Push HEAD, create or update the PR, and run the CI watcher.",
@@ -120,4 +162,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    raise NotImplementedError(args)
+
+    code = preflight()
+    if code != 0:
+        sys.exit(code)
+
+    branch = _current_branch()
+    base = args.base if args.base is not None else _default_branch()
+
+    push_code = _push()
+    if push_code != 0:
+        sys.exit(push_code)
+
+    pr_number = upsert_pr(
+        branch=branch, base=base, title=args.title, body=args.body, draft=args.draft
+    )
+
+    watcher_code = issue_watch_pr.run(pr=pr_number)
+    _print_next_step(watcher_code)
+    sys.exit(watcher_code)
