@@ -83,7 +83,7 @@ issue-claim --list           # list all active claims
 ### Finalize a PR
 
 ```bash
-issue-finalize-pr --title "Fix login redirect" --body "..."
+agent-submit --title "Fix login redirect" --body "..."
 ```
 
 ### Watch CI
