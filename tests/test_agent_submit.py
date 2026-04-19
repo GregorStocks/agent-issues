@@ -32,3 +32,50 @@ def test_parses_optional_flags() -> None:
     )
     assert args.draft is True
     assert args.base == "develop"
+
+
+def test_preflight_fails_when_not_in_git_repo(capsys) -> None:
+    with patch.object(agent_submit, "_run", return_value=_result(returncode=128, stderr="not a git repo")):
+        code = agent_submit.preflight()
+    assert code == 10
+    assert "not in a git repository" in capsys.readouterr().out.lower()
+
+
+def test_preflight_fails_on_default_branch(capsys) -> None:
+    # First _run call: git rev-parse --is-inside-work-tree -> ok
+    # Second: git branch --show-current -> "main"
+    # Third: gh repo view ... -> "main"
+    results = [
+        _result(stdout="true\n"),
+        _result(stdout="main\n"),
+        _result(stdout="main\n"),
+    ]
+    with patch.object(agent_submit, "_run", side_effect=results):
+        code = agent_submit.preflight()
+    assert code == 10
+    assert "default branch" in capsys.readouterr().out.lower()
+
+
+def test_preflight_fails_on_dirty_tree(capsys) -> None:
+    results = [
+        _result(stdout="true\n"),
+        _result(stdout="feature-x\n"),
+        _result(stdout="main\n"),
+        _result(stdout=" M file.py\n"),  # porcelain non-empty
+    ]
+    with patch.object(agent_submit, "_run", side_effect=results):
+        code = agent_submit.preflight()
+    assert code == 10
+    assert "uncommitted" in capsys.readouterr().out.lower()
+
+
+def test_preflight_passes_on_clean_feature_branch() -> None:
+    results = [
+        _result(stdout="true\n"),
+        _result(stdout="feature-x\n"),
+        _result(stdout="main\n"),
+        _result(stdout=""),  # porcelain empty
+    ]
+    with patch.object(agent_submit, "_run", side_effect=results):
+        code = agent_submit.preflight()
+    assert code == 0
