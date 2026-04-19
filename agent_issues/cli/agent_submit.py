@@ -1,7 +1,9 @@
 """Push HEAD, create or update the PR, and watch for CI+review outcomes."""
 
 import argparse
+import json
 import subprocess
+import sys
 from typing import Sequence
 
 EXIT_PREFLIGHT = 10
@@ -54,6 +56,48 @@ def preflight() -> int:
         return EXIT_PREFLIGHT
 
     return 0
+
+
+def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str:
+    """Create a PR if none exists on this branch, else edit the existing one.
+
+    Returns the PR number as a string. Prints the PR URL.
+    """
+    list_result = _run(
+        ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number"]
+    )
+    assert list_result.returncode == 0, f"gh pr list failed: {list_result.stderr}"
+    prs = json.loads(list_result.stdout) if list_result.stdout.strip() else []
+    assert isinstance(prs, list), f"gh pr list returned non-list: {type(prs).__name__}"
+
+    if len(prs) > 1:
+        print(
+            f"agent-submit: branch {branch} has more than one open PR ({len(prs)} found). "
+            "Close the extras and retry.",
+            flush=True,
+        )
+        sys.exit(EXIT_PREFLIGHT)
+
+    if not prs:
+        create_cmd = ["gh", "pr", "create", "--base", base, "--title", title, "--body", body]
+        if draft:
+            create_cmd.append("--draft")
+        create_result = _run(create_cmd)
+        assert create_result.returncode == 0, f"gh pr create failed: {create_result.stderr}"
+        print(create_result.stdout.strip(), flush=True)
+        number_result = _run(
+            ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "--jq", ".[0].number"]
+        )
+        assert number_result.returncode == 0, f"gh pr list (post-create) failed: {number_result.stderr}"
+        return number_result.stdout.strip()
+
+    pr_number = str(prs[0]["number"])
+    edit_result = _run(["gh", "pr", "edit", pr_number, "--title", title, "--body", body])
+    assert edit_result.returncode == 0, f"gh pr edit failed: {edit_result.stderr}"
+    view_result = _run(["gh", "pr", "view", pr_number, "--json", "url", "--jq", ".url"])
+    if view_result.returncode == 0:
+        print(view_result.stdout.strip(), flush=True)
+    return pr_number
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
