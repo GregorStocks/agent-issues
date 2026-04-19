@@ -84,19 +84,18 @@ def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str
             create_cmd.append("--draft")
         create_result = _run(create_cmd)
         assert create_result.returncode == 0, f"gh pr create failed: {create_result.stderr}"
-        print(create_result.stdout.strip(), flush=True)
-        number_result = _run(
-            ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number", "--jq", ".[0].number"]
-        )
-        assert number_result.returncode == 0, f"gh pr list (post-create) failed: {number_result.stderr}"
-        return number_result.stdout.strip()
+        url = create_result.stdout.strip()
+        print(url, flush=True)
+        pr_number = url.rsplit("/", 1)[-1]
+        assert pr_number.isdigit(), f"could not parse PR number from gh pr create output: {url!r}"
+        return pr_number
 
     pr_number = str(prs[0]["number"])
     edit_result = _run(["gh", "pr", "edit", pr_number, "--title", title, "--body", body])
     assert edit_result.returncode == 0, f"gh pr edit failed: {edit_result.stderr}"
     view_result = _run(["gh", "pr", "view", pr_number, "--json", "url", "--jq", ".url"])
-    if view_result.returncode == 0:
-        print(view_result.stdout.strip(), flush=True)
+    assert view_result.returncode == 0, f"gh pr view failed: {view_result.stderr}"
+    print(view_result.stdout.strip(), flush=True)
     return pr_number
 
 

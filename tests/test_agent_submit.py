@@ -85,7 +85,6 @@ def test_upsert_pr_creates_when_none_exists() -> None:
     results = [
         _result(stdout="[]"),  # gh pr list
         _result(stdout="https://github.com/o/r/pull/7\n"),  # gh pr create
-        _result(stdout="7\n"),  # gh pr list --json number after create
     ]
     with patch.object(agent_submit, "_run", side_effect=results) as run_mock:
         pr_num = agent_submit.upsert_pr(
@@ -102,7 +101,6 @@ def test_upsert_pr_creates_draft_when_flag_set() -> None:
     results = [
         _result(stdout="[]"),
         _result(stdout="https://github.com/o/r/pull/8\n"),
-        _result(stdout="8\n"),
     ]
     with patch.object(agent_submit, "_run", side_effect=results) as run_mock:
         agent_submit.upsert_pr(
