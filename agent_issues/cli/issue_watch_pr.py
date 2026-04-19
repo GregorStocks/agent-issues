@@ -42,8 +42,6 @@ def get_pr_lifecycle_state(pr: str) -> str:
     return "open"
 
 
-
-
 def check_merge_conflict(pr: str) -> bool:
     result = run_gh("pr", "view", pr, "--json", "mergeable", "--jq", ".mergeable")
     if result.returncode != 0:
