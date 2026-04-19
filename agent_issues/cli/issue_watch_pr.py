@@ -42,14 +42,6 @@ def get_pr_lifecycle_state(pr: str) -> str:
     return "open"
 
 
-def exit_if_pr_finished(pr: str) -> None:
-    state = get_pr_lifecycle_state(pr)
-    if state == "merged":
-        print("\nPR has been merged.", flush=True)
-        sys.exit(0)
-    if state == "closed":
-        print("\nPR was closed without merging.", flush=True)
-        sys.exit(1)
 
 
 def check_merge_conflict(pr: str) -> bool:
@@ -165,11 +157,26 @@ def _print_feedback(items: list[dict]) -> None:
         print(f"  {item['formatted']}")
 
 
-def main() -> None:
-    pr = sys.argv[1] if len(sys.argv) > 1 else get_pr_number()
+def run(pr: str | None = None) -> int:
+    """Watch a PR. Returns an exit code rather than calling sys.exit.
+
+    Exit codes:
+        0 - clean (merged, CI pass + codex approved, or CI pass without codex)
+        1 - CI failed or merge conflict
+        2 - review feedback present
+        4 - timed out
+    """
+    pr = pr if pr is not None else get_pr_number()
     nwo = get_repo_nwo()
     print(f"Watching PR #{pr}...", flush=True)
-    exit_if_pr_finished(pr)
+
+    state = get_pr_lifecycle_state(pr)
+    if state == "merged":
+        print("\nPR has been merged.", flush=True)
+        return 0
+    if state == "closed":
+        print("\nPR was closed without merging.", flush=True)
+        return 1
 
     baseline_feedback = {f["formatted"] for f in get_review_feedback(pr, nwo)}
 
@@ -177,15 +184,20 @@ def main() -> None:
     eyes_seen = False
 
     while True:
-        exit_if_pr_finished(pr)
+        state = get_pr_lifecycle_state(pr)
+        if state == "merged":
+            print("\nPR has been merged.", flush=True)
+            return 0
+        if state == "closed":
+            print("\nPR was closed without merging.", flush=True)
+            return 1
 
-        # (d) merge conflict
         if check_merge_conflict(pr):
             print(
                 "\nPR has a merge conflict with the base branch. Merge or rebase to resolve.",
                 flush=True,
             )
-            sys.exit(1)
+            return 1
 
         checks = get_checks(pr)
         elapsed = time.monotonic() - start
@@ -196,15 +208,14 @@ def main() -> None:
                 f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
                 flush=True,
             )
-            sys.exit(4)
+            return 4
 
-        # (a) any check failed
         failed = [
             c for c in checks if c.get("bucket") not in _PASS_BUCKETS | {"pending", None}
         ]
         if failed:
             _print_failed(failed)
-            sys.exit(1)
+            return 1
 
         reactions = get_pr_reactions(pr, nwo)
         if has_reaction(reactions, "eyes"):
@@ -213,15 +224,13 @@ def main() -> None:
         all_feedback = get_review_feedback(pr, nwo)
         new_feedback = [f for f in all_feedback if f["formatted"] not in baseline_feedback]
 
-        # (b) new feedback whose oldest item is >= 20s old
         if new_feedback:
             oldest = min(f["created_at"] for f in new_feedback)
             age = (datetime.now(timezone.utc) - oldest).total_seconds()
             if age >= COMMENT_GRACE:
                 _print_feedback(new_feedback)
-                sys.exit(2)
+                return 2
 
-        # (c) 15 min elapsed and codex never started reviewing
         if elapsed >= NO_EYES_TIMEOUT and not eyes_seen:
             mins = NO_EYES_TIMEOUT // 60
             pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
@@ -242,9 +251,8 @@ def main() -> None:
                     f"No review feedback.",
                     flush=True,
                 )
-            sys.exit(0)
+            return 0
 
-        # Natural success: CI all passing and codex approved
         all_checks_pass = bool(checks) and all(
             c.get("bucket") in _PASS_BUCKETS for c in checks
         )
@@ -256,7 +264,7 @@ def main() -> None:
                 f"Codex approved (thumbs up). No review feedback.",
                 flush=True,
             )
-            sys.exit(0)
+            return 0
 
         pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
         mins = int(elapsed // 60)
@@ -273,3 +281,8 @@ def main() -> None:
             print(f"  [{mins}m] CI done; waiting for codex...", flush=True)
 
         time.sleep(POLL_INTERVAL)
+
+
+def main() -> None:
+    pr = sys.argv[1] if len(sys.argv) > 1 else None
+    sys.exit(run(pr))
