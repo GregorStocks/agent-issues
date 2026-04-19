@@ -128,11 +128,6 @@ def _print_next_step(code: int) -> None:
             "\nNEXT STEP: Review feedback received. Address the comments, then re-run `agent-submit`.",
             flush=True,
         )
-    elif code == 3:
-        print(
-            "\nNEXT STEP: Both CI failures and review feedback. Address both, then re-run `agent-submit`.",
-            flush=True,
-        )
     elif code == 4:
         print(
             "\nNEXT STEP: Watcher timed out — likely all fine but didn't confirm. "

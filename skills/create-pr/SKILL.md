@@ -81,7 +81,6 @@ If either exists, read it and follow its instructions alongside this workflow. T
    | 0     | All clean. Done.                                                                          |
    | 1     | CI failed or merge conflict. If merge conflict, merge the default branch and resolve. Otherwise use `gh run view <run-id> --log-failed` (ID from the printed link), fix the root cause, commit, then re-run `agent-submit`. |
    | 2     | Review feedback arrived. Read the printed feedback; for inline comments fetch full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each, commit, re-run. |
-   | 3     | Both CI failures and review feedback. Address both, then re-run.                          |
    | 4     | Watcher timed out — **terminal**. Do not re-run automatically; stop and wait for the user. |
    | 10+   | Preflight failed (on default branch, dirty working tree, not a git repo, etc.). Fix and re-run. |
 

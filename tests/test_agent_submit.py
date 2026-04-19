@@ -154,12 +154,6 @@ def test_next_step_footer_for_exit_2(capsys) -> None:
     assert "Review feedback" in capsys.readouterr().out
 
 
-def test_next_step_footer_for_exit_3(capsys) -> None:
-    agent_submit._print_next_step(3)
-    out = capsys.readouterr().out
-    assert "Both" in out or "both" in out
-
-
 def test_next_step_footer_for_exit_4(capsys) -> None:
     agent_submit._print_next_step(4)
     out = capsys.readouterr().out

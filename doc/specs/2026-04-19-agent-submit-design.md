@@ -55,12 +55,11 @@ agent-submit --title "<title>" --body "<body>" [--draft] [--base <branch>]
 | 0    | Push + PR + watcher all clean.                                   |
 | 1    | CI failed or PR has a merge conflict. Fix and re-run.            |
 | 2    | Review feedback received. Address and re-run.                    |
-| 3    | Both CI failures and review feedback.                            |
 | 4    | Watcher timed out. **Terminal — do not re-run; wait for user.**  |
 | 10   | Preflight guard failed (not a git repo, on default branch, dirty |
 |      | working tree, `gh` not authenticated).                           |
 
-Codes 0–4 are relayed verbatim from the existing `issue-watch-pr` logic.
+Codes 0, 1, 2, and 4 are relayed verbatim from the existing `issue-watch-pr` logic (the watcher short-circuits on the first failure condition, so a combined "both" exit is not produced).
 Code 10 is new and distinguishable from watcher outcomes.
 
 ### Output
@@ -71,8 +70,6 @@ Code 10 is new and distinguishable from watcher outcomes.
   - `1` → "CI failed or merge conflict. Investigate with `gh run view ...`,
     fix, then re-run `agent-submit`."
   - `2` → "Review feedback received. Address comments, then re-run
-    `agent-submit`."
-  - `3` → "Both CI failures and review feedback. Address both, then re-run
     `agent-submit`."
   - `4` → "Watcher timed out — likely all fine but didn't confirm. Do not
     re-run automatically; stop and wait for the user."
