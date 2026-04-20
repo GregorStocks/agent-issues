@@ -17,18 +17,13 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
 ## Workflow
 
-0. **Preflight check** — before doing anything else, verify the branch is clean and up to date:
+0. **Preflight check** — run this single command to verify the working tree is clean, HEAD matches `origin/<default-branch>`, and no open PR is already tied to the current branch:
 
    ```bash
-   git fetch origin
+   agent-preflight
    ```
 
-   Then check that:
-   - `git status --porcelain` is empty (no uncommitted changes)
-   - `git rev-parse HEAD` equals `git rev-parse origin/$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)` (no extra commits)
-   - the current branch has **no open PR** (`gh pr list --head "$(git branch --show-current)" --state open --json number,title,url`)
-
-   If any check fails, **stop immediately** and tell the user. Do not proceed — solve-issue must start from a clean branch that matches the default branch exactly and is not already tied to an open PR.
+   If it exits non-zero, **stop immediately** and tell the user what failed. Do not proceed — solve-issue must start from a clean branch that matches the default branch exactly and is not already tied to an open PR.
 
 1. **Resolve a user-supplied issue argument** — only if the user explicitly passed an issue name/path. Use your judgment to determine the issue file they very obviously meant before invoking the claim script.
 
