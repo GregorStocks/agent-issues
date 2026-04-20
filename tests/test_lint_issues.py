@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from agent_issues.cli import issue_lint
-from agent_issues.json5_utils import dumps_json5
+from agent_issues.cli.issue_fmt import format_issue_text
 
 
 def _make_valid_issue() -> dict:
@@ -20,7 +20,7 @@ def _make_valid_issue() -> dict:
 
 
 def _write_issue(issues_dir: Path, name: str, data: dict) -> None:
-    (issues_dir / f"{name}.json5").write_text(dumps_json5(data))
+    (issues_dir / f"{name}.json5").write_text(format_issue_text(data))
 
 
 def test_passes_on_valid_issue(tmp_path: Path) -> None:
@@ -45,25 +45,6 @@ def test_passes_with_string_blocked(tmp_path: Path) -> None:
     issue = _make_valid_issue()
     issue["blocked"] = "Waiting for upstream dependency fix."
     _write_issue(issues_dir, "blocked-good-issue", issue)
-    assert issue_lint.lint_issues(tmp_path) == []
-
-
-def test_passes_on_json5_syntax(tmp_path: Path) -> None:
-    issues_dir = tmp_path / "issues"
-    issues_dir.mkdir()
-    (issues_dir / "p2-json5-issue.json5").write_text(
-        """{
-  title: "Test issue",
-  description: "A test issue",
-  status: "open",
-  priority: 2,
-  type: "bug",
-  labels: ["test"],
-  created_at: "2026-03-01T12:00:00.000000-08:00",
-  updated_at: "2026-03-01T12:00:00.000000-08:00",
-}
-"""
-    )
     assert issue_lint.lint_issues(tmp_path) == []
 
 
@@ -135,26 +116,25 @@ def test_catches_legacy_json_extension(tmp_path: Path) -> None:
     assert errors == ["p2-legacy.json: legacy issue file extension; rename to .json5"]
 
 
-def test_catches_long_lines(tmp_path: Path) -> None:
+def test_catches_unformatted_issue(tmp_path: Path) -> None:
+    """Anything issue-fmt would rewrite must fail lint."""
     issues_dir = tmp_path / "issues"
     issues_dir.mkdir()
     issue = _make_valid_issue()
-    issue["description"] = "word " * 200  # ~1000 chars on one line
-    # Write raw JSON to avoid dumps_json5 wrapping it for us.
+    reversed_issue = dict(reversed(list(issue.items())))
     import json
 
-    (issues_dir / "p2-long-lines.json5").write_text(json.dumps(issue, indent=2))
+    (issues_dir / "p2-reversed.json5").write_text(json.dumps(reversed_issue, indent=2))
     errors = issue_lint.lint_issues(tmp_path)
-    assert any("line too long" in e for e in errors)
+    assert any("formatting out of date" in e for e in errors)
     assert any("issue-fmt" in e for e in errors)
 
 
-def test_formatted_issue_passes_line_length(tmp_path: Path) -> None:
-    """An issue written through dumps_json5 should never trigger line-length."""
+def test_long_description_passes_when_formatted(tmp_path: Path) -> None:
+    """A long description wrapped by issue-fmt passes lint."""
     issues_dir = tmp_path / "issues"
     issues_dir.mkdir()
     issue = _make_valid_issue()
     issue["description"] = "word " * 200
     _write_issue(issues_dir, "p2-wrapped-issue", issue)
-    errors = issue_lint.lint_issues(tmp_path)
-    assert not any("line too long" in e for e in errors)
+    assert issue_lint.lint_issues(tmp_path) == []
