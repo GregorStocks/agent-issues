@@ -19,12 +19,10 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
 1. **Commit any uncommitted work.** Check `git status` — if there are staged or unstaged changes, commit them before proceeding. Everything that's part of this PR should be in a commit.
 
-2. **Understand the full scope of changes.** Run these in parallel:
+2. **Understand the full scope of changes.** Run this single command — it fetches origin, then prints the commits ahead of the default branch and the diff stat:
 
    ```bash
-   git fetch origin
-   git log --oneline origin/$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)..HEAD
-   git diff origin/$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)..HEAD --stat
+   branch-summary
    ```
 
    Read through the actual diffs and changed files — don't just look at filenames. You need to understand what changed and why to write a good PR.
