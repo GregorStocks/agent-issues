@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pyjson5
 
+from agent_issues.cli.issue_fmt import format_issue_text
 from agent_issues.issue_files import iter_issue_files, load_issue
 
 REQUIRED_FIELDS = {
@@ -23,7 +24,6 @@ OPTIONAL_FIELDS = {"blocked"}
 
 KNOWN_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
 FILENAME_RE = re.compile(r"^(p[1-4]|blocked)-[a-z0-9][a-z0-9-]*$")
-MAX_LINE_LENGTH = 120
 
 
 def _expected_filename_prefix(issue: dict) -> str:
@@ -87,14 +87,8 @@ def lint_issues(project_root: Path) -> list[str]:
         if "blocked" in issue and not isinstance(issue["blocked"], (bool, str)):
             errors.append(f"{issue_file.name}: blocked must be a boolean or string")
 
-        raw = issue_file.read_text()
-        for line_no, raw_line in enumerate(raw.split("\n"), 1):
-            if len(raw_line) > MAX_LINE_LENGTH:
-                errors.append(
-                    f"{issue_file.name}:{line_no}: line too long "
-                    f"({len(raw_line)} > {MAX_LINE_LENGTH}); run issue-fmt"
-                )
-                break
+        if issue_file.read_text() != format_issue_text(issue):
+            errors.append(f"{issue_file.name}: formatting out of date; run issue-fmt")
 
     return errors
 

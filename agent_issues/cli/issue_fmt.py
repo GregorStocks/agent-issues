@@ -19,10 +19,8 @@ FIELD_ORDER = [
 ]
 
 
-def fmt_issue(path: Path) -> bool:
-    """Reformat a single issue file. Returns True if the file changed."""
-    issue = load_issue(path)
-
+def format_issue_text(issue: dict) -> str:
+    """Return the canonical on-disk representation of an issue dict."""
     ordered: dict = {}
     for field in FIELD_ORDER:
         if field in issue:
@@ -30,13 +28,14 @@ def fmt_issue(path: Path) -> bool:
     for field in issue:
         if field not in ordered:
             ordered[field] = issue[field]
+    return dumps_json5(ordered) + "\n"
 
-    formatted = dumps_json5(ordered) + "\n"
-    original = path.read_text()
 
-    if formatted == original:
+def fmt_issue(path: Path) -> bool:
+    """Reformat a single issue file. Returns True if the file changed."""
+    formatted = format_issue_text(load_issue(path))
+    if formatted == path.read_text():
         return False
-
     path.write_text(formatted)
     return True
 
