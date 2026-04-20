@@ -109,9 +109,19 @@ def _current_branch() -> str:
     return branch
 
 
-def _push() -> int:
-    """Push HEAD to origin. Returns git's exit code."""
-    return subprocess.run(["git", "push", "origin", "HEAD"]).returncode
+def _push(force: bool = False) -> int:
+    """Push HEAD to origin. Returns git's exit code.
+
+    When force=True, uses --force-with-lease. Safe here because preflight
+    refuses to run on the default branch, so force only ever targets an
+    agent-owned feature branch, and --force-with-lease still rejects the push
+    if someone else updated the remote since we last fetched.
+    """
+    cmd = ["git", "push"]
+    if force:
+        cmd.append("--force-with-lease")
+    cmd += ["origin", "HEAD"]
+    return subprocess.run(cmd).returncode
 
 
 def _print_next_step(code: int) -> None:
@@ -152,6 +162,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Base branch for new PRs (default: repo's default branch).",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force-push with lease (after rebase or amend). Preflight still blocks the default branch.",
+    )
     return parser.parse_args(argv)
 
 
@@ -165,7 +180,7 @@ def main() -> None:
     branch = _current_branch()
     base = args.base if args.base is not None else _default_branch()
 
-    push_code = _push()
+    push_code = _push(force=args.force)
     if push_code != 0:
         sys.exit(push_code)
 
