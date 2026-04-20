@@ -28,10 +28,32 @@ def test_parses_title_and_body() -> None:
 
 def test_parses_optional_flags() -> None:
     args = agent_submit.parse_args(
-        ["--title", "T", "--body", "B", "--draft", "--base", "develop"]
+        ["--title", "T", "--body", "B", "--draft", "--base", "develop", "--force"]
     )
     assert args.draft is True
     assert args.base == "develop"
+    assert args.force is True
+
+
+def test_force_defaults_to_false() -> None:
+    args = agent_submit.parse_args(["--title", "T", "--body", "B"])
+    assert args.force is False
+
+
+def test_push_omits_force_by_default() -> None:
+    with patch("agent_issues.cli.agent_submit.subprocess.run") as run_mock:
+        run_mock.return_value = CompletedProcess(args=[], returncode=0)
+        agent_submit._push()
+    cmd = run_mock.call_args.args[0]
+    assert cmd == ["git", "push", "origin", "HEAD"]
+
+
+def test_push_uses_force_with_lease_when_requested() -> None:
+    with patch("agent_issues.cli.agent_submit.subprocess.run") as run_mock:
+        run_mock.return_value = CompletedProcess(args=[], returncode=0)
+        agent_submit._push(force=True)
+    cmd = run_mock.call_args.args[0]
+    assert cmd == ["git", "push", "--force-with-lease", "origin", "HEAD"]
 
 
 def test_preflight_fails_when_not_in_git_repo(capsys) -> None:
@@ -173,7 +195,7 @@ def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
         patch.object(agent_submit, "preflight", return_value=0),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
-        patch.object(agent_submit, "_push", return_value=0),
+        patch.object(agent_submit, "_push", return_value=0) as push_mock,
         patch.object(agent_submit, "upsert_pr", return_value="42"),
         patch.object(issue_watch_pr, "run", return_value=2) as watcher_mock,
         pytest.raises(SystemExit) as exc,
@@ -181,6 +203,23 @@ def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
         agent_submit.main()
     assert exc.value.code == 2
     watcher_mock.assert_called_once_with(pr="42")
+    push_mock.assert_called_once_with(force=False)
+
+
+def test_main_passes_force_flag_to_push() -> None:
+    from agent_issues.cli import issue_watch_pr
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B", "--force"]),
+        patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_push", return_value=0) as push_mock,
+        patch.object(agent_submit, "upsert_pr", return_value="42"),
+        patch.object(issue_watch_pr, "run", return_value=0),
+        pytest.raises(SystemExit),
+    ):
+        agent_submit.main()
+    push_mock.assert_called_once_with(force=True)
 
 
 def test_main_exits_early_on_preflight_failure() -> None:
