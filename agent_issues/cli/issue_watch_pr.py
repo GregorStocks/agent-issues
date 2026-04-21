@@ -12,8 +12,8 @@ from typing import Any
 
 POLL_INTERVAL = 30
 COMMENT_GRACE = 20
-NO_EYES_TIMEOUT = 15 * 60
-TIMEOUT = 1800
+NO_EYES_TIMEOUT = 45 * 60
+TIMEOUT = NO_EYES_TIMEOUT + POLL_INTERVAL
 
 _PASS_BUCKETS = {"pass", "skipping"}
 _RUN_LOGGER: logging.Logger | None = None

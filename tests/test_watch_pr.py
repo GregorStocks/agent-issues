@@ -154,9 +154,9 @@ def test_main_does_not_exit_while_new_comment_is_younger_than_grace(capsys) -> N
     assert mock_sleep.call_count >= 1
 
 
-def test_main_exits_0_after_15_min_with_no_eyes(capsys) -> None:
+def test_main_exits_0_after_45_min_with_no_eyes(capsys) -> None:
     passing_checks = [{"name": "lint", "bucket": "pass", "link": "l"}]
-    # monotonic returns start (0.0) for the initial call, then 16 min later
+    # monotonic returns start (0.0) for the initial call, then exactly 45 min later
     with (
         patch.object(sys, "argv", ["issue-watch-pr", "123"]),
         patch.object(issue_watch_pr, "get_repo_nwo", return_value="owner/repo"),
@@ -166,14 +166,14 @@ def test_main_exits_0_after_15_min_with_no_eyes(capsys) -> None:
         patch.object(issue_watch_pr, "get_checks", return_value=passing_checks),
         patch.object(issue_watch_pr, "get_pr_reactions", return_value=[]),
         patch.object(issue_watch_pr.time, "sleep"),
-        patch.object(issue_watch_pr.time, "monotonic", side_effect=[0.0, 16 * 60]),
+        patch.object(issue_watch_pr.time, "monotonic", side_effect=[0.0, 45 * 60]),
         pytest.raises(SystemExit) as excinfo,
     ):
         issue_watch_pr.main()
 
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
-    assert "No codex review after 15 min" in out
+    assert "No codex review after 45 min" in out
 
 
 def test_main_does_not_exit_when_plus_one_but_ci_still_pending() -> None:
