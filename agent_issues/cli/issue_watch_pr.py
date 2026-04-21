@@ -1,10 +1,14 @@
 """Watch a PR until checks and review feedback settle."""
 
 import json
+import logging
+import os
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 POLL_INTERVAL = 30
 COMMENT_GRACE = 20
@@ -12,41 +16,109 @@ NO_EYES_TIMEOUT = 15 * 60
 TIMEOUT = 1800
 
 _PASS_BUCKETS = {"pass", "skipping"}
+_RUN_LOGGER: logging.Logger | None = None
 
 
 def run_gh(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["gh", *args], capture_output=True, text=True)
+    result = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if _RUN_LOGGER is not None:
+        _RUN_LOGGER.debug(
+            "gh %s -> exit=%s stdout=%r stderr=%r",
+            " ".join(args),
+            result.returncode,
+            result.stdout,
+            result.stderr,
+        )
+    return result
+
+
+def _setup_run_logger() -> logging.Logger | None:
+    logs_dir = Path.cwd() / "logs"
+    if not logs_dir.is_dir():
+        return None
+
+    started_at = datetime.now().astimezone()
+    file_name = (
+        f"agent-submit-{started_at.strftime('%Y%m%d-%H%M%S%z')}"
+        f"-pid{os.getpid()}-{time.time_ns()}.log"
+    )
+    log_path = logs_dir / file_name
+    logger_name = f"agent_submit.issue_watch_pr.{started_at.strftime('%Y%m%d%H%M%S')}.{os.getpid()}.{time.time_ns()}"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S%z",
+        )
+    )
+    logger.addHandler(handler)
+    logger.info(
+        "agent-submit watcher logging enabled cwd=%s logs_dir=%s log_path=%s",
+        Path.cwd(),
+        logs_dir,
+        log_path,
+    )
+    return logger
+
+
+def _teardown_run_logger(logger: logging.Logger | None) -> None:
+    if logger is None:
+        return
+    for handler in list(logger.handlers):
+        handler.close()
+        logger.removeHandler(handler)
+
+
+def _log(level: int, message: str, *args: Any) -> None:
+    if _RUN_LOGGER is not None:
+        _RUN_LOGGER.log(level, message, *args)
 
 
 def get_pr_number() -> str:
     result = run_gh("pr", "view", "--json", "number", "--jq", ".number")
     assert result.returncode == 0, f"No open PR for current branch: {result.stderr}"
-    return result.stdout.strip()
+    pr = result.stdout.strip()
+    _log(logging.DEBUG, "resolved current branch PR number=%s", pr)
+    return pr
 
 
 def get_repo_nwo() -> str:
     result = run_gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     assert result.returncode == 0, f"Failed to get repo info: {result.stderr}"
-    return result.stdout.strip()
+    nwo = result.stdout.strip()
+    _log(logging.DEBUG, "resolved repo nameWithOwner=%s", nwo)
+    return nwo
 
 
 def get_pr_lifecycle_state(pr: str) -> str:
     result = run_gh("pr", "view", pr, "--json", "state,mergedAt")
     if result.returncode != 0:
+        _log(logging.WARNING, "failed to fetch PR lifecycle state for pr=%s; assuming open", pr)
         return "open"
     data = json.loads(result.stdout) if result.stdout.strip() else {}
     if data.get("mergedAt"):
+        _log(logging.DEBUG, "pr=%s lifecycle state=merged payload=%s", pr, data)
         return "merged"
     if data.get("state") == "CLOSED":
+        _log(logging.DEBUG, "pr=%s lifecycle state=closed payload=%s", pr, data)
         return "closed"
+    _log(logging.DEBUG, "pr=%s lifecycle state=open payload=%s", pr, data)
     return "open"
 
 
 def check_merge_conflict(pr: str) -> bool:
     result = run_gh("pr", "view", pr, "--json", "mergeable", "--jq", ".mergeable")
     if result.returncode != 0:
+        _log(logging.WARNING, "failed to fetch mergeable state for pr=%s; assuming no conflict", pr)
         return False
-    return result.stdout.strip() == "CONFLICTING"
+    conflicting = result.stdout.strip() == "CONFLICTING"
+    _log(logging.DEBUG, "pr=%s merge_conflict=%s raw=%r", pr, conflicting, result.stdout.strip())
+    return conflicting
 
 
 def get_checks(pr: str) -> list[dict]:
@@ -54,15 +126,20 @@ def get_checks(pr: str) -> list[dict]:
     assert result.returncode in (0, 1, 8), (
         f"gh pr checks failed (exit {result.returncode}): {result.stderr}"
     )
-    return json.loads(result.stdout) if result.stdout.strip() else []
+    checks = json.loads(result.stdout) if result.stdout.strip() else []
+    _log(logging.DEBUG, "pr=%s fetched %s check(s): %s", pr, len(checks), checks)
+    return checks
 
 
 def get_pr_reactions(pr: str, nwo: str) -> list[dict]:
     """Fetch reactions on the PR body."""
     result = run_gh("api", "--paginate", f"repos/{nwo}/issues/{pr}/reactions")
     if result.returncode != 0:
+        _log(logging.WARNING, "failed to fetch PR reactions for pr=%s repo=%s", pr, nwo)
         return []
-    return json.loads(result.stdout) if result.stdout.strip() else []
+    reactions = json.loads(result.stdout) if result.stdout.strip() else []
+    _log(logging.DEBUG, "pr=%s fetched %s reaction(s): %s", pr, len(reactions), reactions)
+    return reactions
 
 
 def has_reaction(reactions: list[dict], content: str) -> bool:
@@ -140,6 +217,7 @@ def get_review_feedback(pr: str, nwo: str) -> list[dict]:
                 }
             )
 
+    _log(logging.DEBUG, "pr=%s fetched %s feedback item(s)", pr, len(feedback))
     return feedback
 
 
@@ -164,121 +242,195 @@ def run(pr: str | None = None) -> int:
         2 - review feedback present
         4 - timed out
     """
-    pr = pr if pr is not None else get_pr_number()
-    nwo = get_repo_nwo()
-    print(f"Watching PR #{pr}...", flush=True)
+    global _RUN_LOGGER
 
-    state = get_pr_lifecycle_state(pr)
-    if state == "merged":
-        print("\nPR has been merged.", flush=True)
-        return 0
-    if state == "closed":
-        print("\nPR was closed without merging.", flush=True)
-        return 1
+    _RUN_LOGGER = _setup_run_logger()
+    try:
+        pr = pr if pr is not None else get_pr_number()
+        nwo = get_repo_nwo()
+        print(f"Watching PR #{pr}...", flush=True)
+        _log(logging.INFO, "starting watcher pr=%s repo=%s", pr, nwo)
 
-    baseline_feedback = {f["formatted"] for f in get_review_feedback(pr, nwo)}
-
-    start = time.monotonic()
-    eyes_seen = False
-
-    while True:
         state = get_pr_lifecycle_state(pr)
         if state == "merged":
+            _log(logging.INFO, "exiting clean because pr=%s is already merged", pr)
             print("\nPR has been merged.", flush=True)
             return 0
         if state == "closed":
+            _log(logging.INFO, "exiting with failure because pr=%s is already closed", pr)
             print("\nPR was closed without merging.", flush=True)
             return 1
 
-        if check_merge_conflict(pr):
-            print(
-                "\nPR has a merge conflict with the base branch. Merge or rebase to resolve.",
-                flush=True,
-            )
-            return 1
+        baseline_feedback = {f["formatted"] for f in get_review_feedback(pr, nwo)}
+        _log(logging.INFO, "baseline feedback count=%s items=%s", len(baseline_feedback), sorted(baseline_feedback))
 
-        checks = get_checks(pr)
-        elapsed = time.monotonic() - start
+        start = time.monotonic()
+        eyes_seen = False
+        poll_count = 0
 
-        if elapsed > TIMEOUT:
+        while True:
+            poll_count += 1
+            _log(logging.INFO, "poll=%s begin", poll_count)
+
+            state = get_pr_lifecycle_state(pr)
+            if state == "merged":
+                _log(logging.INFO, "poll=%s exiting clean because pr merged", poll_count)
+                print("\nPR has been merged.", flush=True)
+                return 0
+            if state == "closed":
+                _log(logging.INFO, "poll=%s exiting with failure because pr closed", poll_count)
+                print("\nPR was closed without merging.", flush=True)
+                return 1
+
+            if check_merge_conflict(pr):
+                _log(logging.INFO, "poll=%s exiting with failure because merge conflict detected", poll_count)
+                print(
+                    "\nPR has a merge conflict with the base branch. Merge or rebase to resolve.",
+                    flush=True,
+                )
+                return 1
+
+            checks = get_checks(pr)
+            elapsed = time.monotonic() - start
             pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
-            print(
-                f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
-                flush=True,
+            failed = [
+                c for c in checks if c.get("bucket") not in _PASS_BUCKETS | {"pending", None}
+            ]
+            _log(
+                logging.INFO,
+                "poll=%s observed elapsed=%.1fs checks=%s pending=%s failed=%s",
+                poll_count,
+                elapsed,
+                checks,
+                pending,
+                failed,
             )
-            return 4
 
-        failed = [
-            c for c in checks if c.get("bucket") not in _PASS_BUCKETS | {"pending", None}
-        ]
-        if failed:
-            _print_failed(failed)
-            return 1
+            if elapsed > TIMEOUT:
+                _log(logging.WARNING, "poll=%s exiting with timeout pending=%s", poll_count, pending)
+                print(
+                    f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
+                    flush=True,
+                )
+                return 4
 
-        reactions = get_pr_reactions(pr, nwo)
-        if has_reaction(reactions, "eyes"):
-            eyes_seen = True
+            if failed:
+                _log(logging.INFO, "poll=%s exiting with failed checks=%s", poll_count, failed)
+                _print_failed(failed)
+                return 1
 
-        all_feedback = get_review_feedback(pr, nwo)
-        new_feedback = [f for f in all_feedback if f["formatted"] not in baseline_feedback]
+            reactions = get_pr_reactions(pr, nwo)
+            saw_eyes = has_reaction(reactions, "eyes")
+            saw_plus_one = has_reaction(reactions, "+1")
+            if saw_eyes:
+                eyes_seen = True
 
-        if new_feedback:
-            oldest = min(f["created_at"] for f in new_feedback)
-            age = (datetime.now(timezone.utc) - oldest).total_seconds()
-            if age >= COMMENT_GRACE:
+            all_feedback = get_review_feedback(pr, nwo)
+            new_feedback = [f for f in all_feedback if f["formatted"] not in baseline_feedback]
+            oldest_feedback_age = None
+            if new_feedback:
+                oldest = min(f["created_at"] for f in new_feedback)
+                oldest_feedback_age = (datetime.now(timezone.utc) - oldest).total_seconds()
+            _log(
+                logging.INFO,
+                "poll=%s observed reactions=%s eyes_seen=%s plus_one=%s feedback_total=%s new_feedback=%s oldest_new_feedback_age=%.1f",
+                poll_count,
+                reactions,
+                eyes_seen,
+                saw_plus_one,
+                len(all_feedback),
+                new_feedback,
+                -1.0 if oldest_feedback_age is None else oldest_feedback_age,
+            )
+
+            if new_feedback and oldest_feedback_age is not None and oldest_feedback_age >= COMMENT_GRACE:
+                _log(
+                    logging.INFO,
+                    "poll=%s exiting with review feedback age=%.1fs items=%s",
+                    poll_count,
+                    oldest_feedback_age,
+                    new_feedback,
+                )
                 _print_feedback(new_feedback)
                 return 2
 
-        if elapsed >= NO_EYES_TIMEOUT and not eyes_seen:
-            mins = NO_EYES_TIMEOUT // 60
-            pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
-            if pending:
+            if elapsed >= NO_EYES_TIMEOUT and not eyes_seen:
+                mins = NO_EYES_TIMEOUT // 60
+                if pending:
+                    _log(
+                        logging.INFO,
+                        "poll=%s exiting clean after no-eyes timeout with pending checks=%s",
+                        poll_count,
+                        pending,
+                    )
+                    print(
+                        f"\nNo codex review after {mins} min. "
+                        f"CI still has {len(pending)} pending check(s): {', '.join(pending)}",
+                        flush=True,
+                    )
+                elif not checks:
+                    _log(logging.INFO, "poll=%s exiting clean after no-eyes timeout with no checks", poll_count)
+                    print(f"\nNo codex review after {mins} min. No CI checks detected.", flush=True)
+                else:
+                    passed = [c for c in checks if c.get("bucket") == "pass"]
+                    skipped = [c for c in checks if c.get("bucket") == "skipping"]
+                    _log(
+                        logging.INFO,
+                        "poll=%s exiting clean after no-eyes timeout passed=%s skipped=%s",
+                        poll_count,
+                        passed,
+                        skipped,
+                    )
+                    print(
+                        f"\nNo codex review after {mins} min. "
+                        f"All checks passed ({len(passed)} passed, {len(skipped)} skipped). "
+                        f"No review feedback.",
+                        flush=True,
+                    )
+                return 0
+
+            all_checks_pass = bool(checks) and all(
+                c.get("bucket") in _PASS_BUCKETS for c in checks
+            )
+            if all_checks_pass and saw_plus_one:
+                passed = [c for c in checks if c.get("bucket") == "pass"]
+                skipped = [c for c in checks if c.get("bucket") == "skipping"]
+                _log(
+                    logging.INFO,
+                    "poll=%s exiting clean with codex approval passed=%s skipped=%s",
+                    poll_count,
+                    passed,
+                    skipped,
+                )
                 print(
-                    f"\nNo codex review after {mins} min. "
-                    f"CI still has {len(pending)} pending check(s): {', '.join(pending)}",
+                    f"\nAll checks passed ({len(passed)} passed, {len(skipped)} skipped). "
+                    f"Codex approved (thumbs up). No review feedback.",
+                    flush=True,
+                )
+                return 0
+
+            mins = int(elapsed // 60)
+            if pending:
+                _log(logging.INFO, "poll=%s sleeping %ss with pending checks=%s", poll_count, POLL_INTERVAL, pending)
+                print(
+                    f"  [{mins}m] {len(pending)} check(s) pending: {', '.join(pending[:5])}",
                     flush=True,
                 )
             elif not checks:
-                print(f"\nNo codex review after {mins} min. No CI checks detected.", flush=True)
+                _log(logging.INFO, "poll=%s sleeping %ss waiting for checks to start", poll_count, POLL_INTERVAL)
+                print(f"  [{mins}m] Waiting for checks to start...", flush=True)
+            elif eyes_seen:
+                _log(logging.INFO, "poll=%s sleeping %ss with ci done and codex reviewing", poll_count, POLL_INTERVAL)
+                print(f"  [{mins}m] CI done; codex reviewing...", flush=True)
             else:
-                passed = [c for c in checks if c.get("bucket") == "pass"]
-                skipped = [c for c in checks if c.get("bucket") == "skipping"]
-                print(
-                    f"\nNo codex review after {mins} min. "
-                    f"All checks passed ({len(passed)} passed, {len(skipped)} skipped). "
-                    f"No review feedback.",
-                    flush=True,
-                )
-            return 0
+                _log(logging.INFO, "poll=%s sleeping %ss with ci done and waiting for codex", poll_count, POLL_INTERVAL)
+                print(f"  [{mins}m] CI done; waiting for codex...", flush=True)
 
-        all_checks_pass = bool(checks) and all(
-            c.get("bucket") in _PASS_BUCKETS for c in checks
-        )
-        if all_checks_pass and has_reaction(reactions, "+1"):
-            passed = [c for c in checks if c.get("bucket") == "pass"]
-            skipped = [c for c in checks if c.get("bucket") == "skipping"]
-            print(
-                f"\nAll checks passed ({len(passed)} passed, {len(skipped)} skipped). "
-                f"Codex approved (thumbs up). No review feedback.",
-                flush=True,
-            )
-            return 0
-
-        pending = [c["name"] for c in checks if c.get("bucket") == "pending"]
-        mins = int(elapsed // 60)
-        if pending:
-            print(
-                f"  [{mins}m] {len(pending)} check(s) pending: {', '.join(pending[:5])}",
-                flush=True,
-            )
-        elif not checks:
-            print(f"  [{mins}m] Waiting for checks to start...", flush=True)
-        elif eyes_seen:
-            print(f"  [{mins}m] CI done; codex reviewing...", flush=True)
-        else:
-            print(f"  [{mins}m] CI done; waiting for codex...", flush=True)
-
-        time.sleep(POLL_INTERVAL)
+            time.sleep(POLL_INTERVAL)
+    finally:
+        logger = _RUN_LOGGER
+        _RUN_LOGGER = None
+        _teardown_run_logger(logger)
 
 
 def main() -> None:
