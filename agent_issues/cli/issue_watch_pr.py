@@ -12,8 +12,8 @@ from typing import Any
 
 POLL_INTERVAL = 30
 COMMENT_GRACE = 20
-NO_EYES_TIMEOUT = 15 * 60
-TIMEOUT = 1800
+NO_EYES_TIMEOUT = 45 * 60
+TIMEOUT = NO_EYES_TIMEOUT + 10 * 60
 
 _PASS_BUCKETS = {"pass", "skipping"}
 _RUN_LOGGER: logging.Logger | None = None
@@ -306,14 +306,6 @@ def run(pr: str | None = None) -> int:
                 failed,
             )
 
-            if elapsed > TIMEOUT:
-                _log(logging.WARNING, "poll=%s exiting with timeout pending=%s", poll_count, pending)
-                print(
-                    f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
-                    flush=True,
-                )
-                return 4
-
             if failed:
                 _log(logging.INFO, "poll=%s exiting with failed checks=%s", poll_count, failed)
                 _print_failed(failed)
@@ -388,6 +380,14 @@ def run(pr: str | None = None) -> int:
                         flush=True,
                     )
                 return 0
+
+            if elapsed > TIMEOUT:
+                _log(logging.WARNING, "poll=%s exiting with timeout pending=%s", poll_count, pending)
+                print(
+                    f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
+                    flush=True,
+                )
+                return 4
 
             all_checks_pass = bool(checks) and all(
                 c.get("bucket") in _PASS_BUCKETS for c in checks
