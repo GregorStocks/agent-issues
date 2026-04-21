@@ -1,6 +1,8 @@
 """Tests for agent_issues.cli.issue_watch_pr."""
 
 import json
+import os
+from pathlib import Path
 import sys
 from datetime import datetime, timedelta, timezone
 from subprocess import CompletedProcess
@@ -224,3 +226,42 @@ def test_main_exits_0_when_ci_passed_and_plus_one(capsys) -> None:
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
     assert "Codex approved" in out
+
+
+def test_run_writes_detailed_log_when_logs_dir_exists(tmp_path: Path) -> None:
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+
+    passing_checks = [
+        {"name": "lint", "bucket": "pass", "link": "l"},
+        {"name": "test", "bucket": "pass", "link": "l"},
+    ]
+    plus_one = [{"content": "+1"}]
+
+    with (
+        patch.object(issue_watch_pr, "get_repo_nwo", return_value="owner/repo"),
+        patch.object(issue_watch_pr, "get_pr_lifecycle_state", return_value="open"),
+        patch.object(issue_watch_pr, "check_merge_conflict", return_value=False),
+        patch.object(issue_watch_pr, "get_review_feedback", return_value=[]),
+        patch.object(issue_watch_pr, "get_checks", return_value=passing_checks),
+        patch.object(issue_watch_pr, "get_pr_reactions", return_value=plus_one),
+        patch.object(issue_watch_pr.time, "sleep"),
+        patch.object(issue_watch_pr.time, "monotonic", return_value=0.0),
+        patch.object(sys, "argv", ["issue-watch-pr", "123"]),
+    ):
+        previous_cwd = Path.cwd()
+        try:
+            os.chdir(tmp_path)
+            code = issue_watch_pr.run("123")
+        finally:
+            os.chdir(previous_cwd)
+
+    assert code == 0
+    log_files = sorted(logs_dir.glob("agent-submit-*.log"))
+    assert len(log_files) == 1
+    content = log_files[0].read_text()
+    assert "INFO" in content
+    assert "starting watcher pr=123 repo=owner/repo" in content
+    assert "poll=1 observed elapsed=0.0s" in content
+    assert "plus_one=True" in content
+    assert "exiting clean with codex approval" in content
