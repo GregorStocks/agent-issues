@@ -37,7 +37,7 @@ For each canonical key, locate the issue file:
 
 3. **Compose a fresh title and body each iteration.** Do not reuse a prior iteration's text verbatim; new commits (CI fixes, review responses) should be reflected.
 
-   **Title**: short, imperative, under 70 characters. Describe the outcome, not the mechanism (e.g., "Fix timeout for slow models" not "Add timeout_secs config parameter").
+   **Title**: short, imperative, under 70 characters. Describe the outcome, not the mechanism (e.g., "Fix timeout for slow models" not "Add timeout config parameter").
 
    **Body**:
 
@@ -47,8 +47,6 @@ For each canonical key, locate the issue file:
 
    ## Test plan
    <bulleted checklist of what you actually verified>
-
-   🤖 Generated with [Claude Code](https://claude.com/claude-code)
    ```
 
    Start with the problem or motivation, then the solution. A reader should understand why this PR exists from the first bullet alone. The test plan lists specific commands, manual testing, or scenarios you actually ran — don't list things you didn't do.
