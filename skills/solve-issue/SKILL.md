@@ -99,7 +99,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
    - [ ] Run lint/typecheck/tests (use repo-specific commands from solve-issue-local)
    - [ ] Delete the issue file and include deletion in the commit
    - [ ] Review changed code for quality
-   - [ ] Submit PR: `agent-submit --title "..." --body "..."` (handles push, PR create/update, and CI watcher)
+   - [ ] Submit PR via the `submit-pr` skill (pass the claimed issue filename as the argument)
    ```
 
    This checklist survives the plan mode boundary and ensures no steps are skipped even if earlier context is compressed.
@@ -125,13 +125,13 @@ If either exists, read it and follow its instructions alongside this workflow. T
 
 12. Review the changed code for reuse, quality, and efficiency. Fix any issues found. If the repo has a `/simplify` skill, use it.
 
-13. Push final changes and finalize the PR. Run `agent-submit` — it pushes, creates or updates the branch PR, and runs the CI watcher end-to-end:
+13. Finalize the PR by invoking the `submit-pr` skill with the claimed issue filename:
 
-    ```bash
-    agent-submit --title "<concise PR title>" --body "<PR description with summary, test plan>"
+    ```
+    /submit-pr <claimed-issue-filename>
     ```
 
-    The PR body must include a short **issue context** section near the top that explains what the original issue was and why this change fixes it. Write it for a reader who may not remember the issue they filed days earlier.
+    `submit-pr` composes the title and body from the branch state (including the deleted issue file's context recovered from git history), pushes, opens or updates the PR, and loops through CI failures and review feedback until the PR is clean.
 
 ## Abandoning an Issue
 
