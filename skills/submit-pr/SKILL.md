@@ -21,11 +21,13 @@ Examples:
 - `/submit-pr p2-fix-timeout.json5` — filename form also accepted.
 - `/submit-pr issues/p2-fix-timeout.json5` — path form also accepted.
 
-**Normalize each argument to a stem** (strip any `issues/` prefix and any `.json5` suffix). The issue file may have been renamed across `blocked-…`/`pN-…` prefixes during the branch's lifetime, so don't assume the exact basename you were given still exists on disk. For each stem:
+**Normalize each argument to a canonical key.** Issue files get renamed across `blocked-…` / `p1-…` / `p2-…` / `p3-…` / `p4-…` prefixes during the branch's lifetime (e.g., unblocking an issue renames `blocked-foo.json5` → `p2-foo.json5`), so you cannot use the argument as a basename directly. Derive the canonical key by (a) stripping any leading `issues/`, (b) stripping any trailing `.json5`, and (c) stripping any leading `p1-`, `p2-`, `p3-`, `p4-`, or `blocked-` prefix. For `p2-fix-timeout` the canonical key is `fix-timeout`; for `blocked-fix-timeout` it's also `fix-timeout`.
 
-1. Try the working tree: `ls issues/*<stem>*.json5` and pick the unique match if one exists.
-2. Otherwise recover from git history. Resolve the default branch first (`DEFAULT=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)`), then run `git log -p "origin/$DEFAULT..HEAD" -- 'issues/*<stem>*.json5'`. The branch's deletion (or rename) commit carries the final content.
-3. If neither locates the file, report to the user which argument failed rather than silently skipping it.
+For each canonical key, locate the issue file:
+
+1. **Working tree first.** Iterate `issues/*.json5`; pick the file whose basename (minus `.json5` minus the priority/blocked prefix) equals the canonical key. Exactly one should match.
+2. **Otherwise recover from git history.** Resolve the default branch (`DEFAULT=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)`) and run `git log -p --follow "origin/$DEFAULT..HEAD" -- issues/`. Find the diff that added or removed an issue file whose canonical key matches. The deletion (or rename) commit carries the final content.
+3. If neither locates the file, report which argument failed rather than silently skipping it.
 
 ## Workflow
 
