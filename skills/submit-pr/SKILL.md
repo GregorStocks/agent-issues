@@ -9,17 +9,23 @@ Push HEAD, open or update the branch's PR, and keep iterating — fix CI failure
 
 ## Arguments
 
-Callers pass zero or more issue filenames that this PR resolves:
+Callers pass zero or more issue identifiers that this PR resolves:
 
 ```
-/submit-pr [issue-filename ...]
+/submit-pr [issue-id ...]
 ```
 
 Examples:
 - `/submit-pr` — no issue context (e.g., invoked from `create-pr` for a general change).
-- `/submit-pr p2-fix-timeout.json5` — this PR resolves a claimed issue.
+- `/submit-pr p2-fix-timeout` — this PR resolves a claimed issue (stem form, as returned by `issue-claim --current`).
+- `/submit-pr p2-fix-timeout.json5` — filename form also accepted.
+- `/submit-pr issues/p2-fix-timeout.json5` — path form also accepted.
 
-Treat any argument as a filename under `issues/`. If the file still exists in the working tree, read it there. Otherwise recover its contents from `git log -p -- issues/<name>` on the current branch (the deletion commit carries the final content).
+**Normalize each argument to a stem** (strip any `issues/` prefix and any `.json5` suffix). The issue file may have been renamed across `blocked-…`/`pN-…` prefixes during the branch's lifetime, so don't assume the exact basename you were given still exists on disk. For each stem:
+
+1. Try the working tree: `ls issues/*<stem>*.json5` and pick the unique match if one exists.
+2. Otherwise recover from git history: `git log -p origin/$(default-branch)..HEAD -- 'issues/*<stem>*.json5'`. The branch's deletion (or rename) commit carries the final content.
+3. If neither locates the file, report to the user which argument failed rather than silently skipping it.
 
 ## Workflow
 
