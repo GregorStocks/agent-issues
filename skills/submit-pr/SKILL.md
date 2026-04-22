@@ -64,6 +64,8 @@ For each canonical key, locate the issue file:
    )"
    ```
 
+  Do not proceed to step 5 until agent-submit has actually exited. If you notice that CI is passing and agent-submit has not exited, we are likely still be waiting for review.
+
 5. **Interpret the exit code:**
 
    | Code  | Meaning                                                                                   |
