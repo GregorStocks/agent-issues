@@ -19,6 +19,9 @@ issue-fmt = "agent_issues.cli.issue_fmt:main"
 issue-lint = "agent_issues.cli.issue_lint:main"
 issue-query = "agent_issues.cli.issue_query:main"
 issue-watch-pr = "agent_issues.cli.issue_watch_pr:main"
+worktree-new = "agent_issues.cli.worktree_new:main"
+worktree-rm = "agent_issues.cli.worktree_rm:main"
+worktree-unrm = "agent_issues.cli.worktree_unrm:main"
 
 [build-system]
 requires = ["hatchling"]
