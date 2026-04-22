@@ -50,11 +50,13 @@ def main() -> None:
         )
     ).parent
 
-    # Record the tip so worktree-unrm can restore it.
+    # Record the tip so worktree-unrm can restore it. Branch names can
+    # contain slashes (e.g. feature/foo), so make sure the parent exists.
     tombstones = tombstone_dir()
-    tombstones.mkdir(parents=True, exist_ok=True)
+    tombstone_path = tombstones / name
+    tombstone_path.parent.mkdir(parents=True, exist_ok=True)
     head = capture(["git", "-C", str(worktree_path), "rev-parse", "HEAD"])
-    (tombstones / name).write_text(head + "\n")
+    tombstone_path.write_text(head + "\n")
 
     cwd = Path.cwd().resolve()
     victim = worktree_path.resolve()
