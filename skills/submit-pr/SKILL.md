@@ -24,7 +24,7 @@ Examples:
 **Normalize each argument to a stem** (strip any `issues/` prefix and any `.json5` suffix). The issue file may have been renamed across `blocked-…`/`pN-…` prefixes during the branch's lifetime, so don't assume the exact basename you were given still exists on disk. For each stem:
 
 1. Try the working tree: `ls issues/*<stem>*.json5` and pick the unique match if one exists.
-2. Otherwise recover from git history: `git log -p origin/$(default-branch)..HEAD -- 'issues/*<stem>*.json5'`. The branch's deletion (or rename) commit carries the final content.
+2. Otherwise recover from git history. Resolve the default branch first (`DEFAULT=$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)`), then run `git log -p "origin/$DEFAULT..HEAD" -- 'issues/*<stem>*.json5'`. The branch's deletion (or rename) commit carries the final content.
 3. If neither locates the file, report to the user which argument failed rather than silently skipping it.
 
 ## Workflow
