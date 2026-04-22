@@ -12,6 +12,7 @@ dependencies = [
 agent-preflight = "agent_issues.cli.agent_preflight:main"
 agent-submit = "agent_issues.cli.agent_submit:main"
 branch-summary = "agent_issues.cli.branch_summary:main"
+coding-agent-here = "agent_issues.cli.coding_agent_here:main"
 issue-abandon = "agent_issues.cli.issue_abandon:main"
 issue-autoclaim = "agent_issues.cli.issue_autoclaim:main"
 issue-claim = "agent_issues.cli.issue_claim:main"
