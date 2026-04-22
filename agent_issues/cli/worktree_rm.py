@@ -56,7 +56,9 @@ def main() -> None:
     head = capture(["git", "-C", str(worktree_path), "rev-parse", "HEAD"])
     (tombstones / name).write_text(head + "\n")
 
-    inside_victim = Path.cwd().resolve() == worktree_path.resolve()
+    cwd = Path.cwd().resolve()
+    victim = worktree_path.resolve()
+    inside_victim = cwd == victim or victim in cwd.parents
     if inside_victim:
         # Can't operate on git from a directory about to be deleted.
         os.chdir(source_root)
