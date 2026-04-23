@@ -30,7 +30,9 @@ _agent-new-worktree-if-main() {
     local rel
     rel=$(git rev-parse --show-prefix)
     worktree-new || return
-    [ -n "$rel" ] && [ -d "$rel" ] && cd "$rel"
+    if [ -n "$rel" ] && [ -d "$rel" ]; then
+        cd "$rel"
+    fi
 }
 
 cod() { _agent-new-worktree-if-main && codex --dangerously-bypass-approvals-and-sandbox "$@"; }
