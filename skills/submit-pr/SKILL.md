@@ -37,7 +37,7 @@ For each canonical key, locate the issue file:
 
 3. **Compose a fresh title and body each iteration.** Do not reuse a prior iteration's text verbatim; new commits (CI fixes, review responses) should be reflected.
 
-   **Title**: short, imperative, under 70 characters. Describe the outcome, not the mechanism (e.g., "Fix timeout for slow models" not "Add timeout config parameter").
+   **Title**: short, imperative, under 70 characters. Describe the outcome, not the mechanism (e.g., "Fix timeout for slow models" not "Add timeout config parameter"). The title should reflect ALL changes on the branch, not just the most recent ones.
 
    **Body**:
 
