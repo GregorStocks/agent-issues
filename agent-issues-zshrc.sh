@@ -23,5 +23,17 @@ worktree-unrm() {
     [ -n "$target" ] && cd "$target"
 }
 
-alias cod='coding-agent-here codex --dangerously-bypass-approvals-and-sandbox'
-alias cld='coding-agent-here claude --permission-mode=auto'
+_agent-new-worktree-if-main() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    [ "$(git rev-parse --path-format=absolute --git-dir)" = \
+      "$(git rev-parse --path-format=absolute --git-common-dir)" ] || return 0
+    local rel
+    rel=$(git rev-parse --show-prefix)
+    worktree-new || return
+    if [ -n "$rel" ] && [ -d "$rel" ]; then
+        cd "$rel"
+    fi
+}
+
+cod() { _agent-new-worktree-if-main && codex --dangerously-bypass-approvals-and-sandbox "$@"; }
+cld() { _agent-new-worktree-if-main && claude --permission-mode=auto "$@"; }
