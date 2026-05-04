@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from typing import Sequence
@@ -9,10 +10,26 @@ from typing import Sequence
 from agent_issues.cli import issue_watch_pr
 
 EXIT_PREFLIGHT = 10
+ESCAPED_BACKTICK_CODE_SPAN = re.compile(r"\\`[^\n`]+\\`")
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def validate_pr_body_markdown(body: str, allow_escaped_backticks: bool = False) -> int:
+    """Reject likely shell-escaped inline-code spans unless explicitly allowed."""
+    if allow_escaped_backticks or not ESCAPED_BACKTICK_CODE_SPAN.search(body):
+        return 0
+
+    print(
+        "agent-submit: refusing to push — PR body contains escaped inline-code markers. "
+        "Pass Markdown code spans unescaped, usually with a single-quoted heredoc. "
+        "If the escaped backticks are intentional literal text, rerun with "
+        "--allow-escaped-backticks.",
+        flush=True,
+    )
+    return EXIT_PREFLIGHT
 
 
 def _default_branch() -> str:
@@ -167,11 +184,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Force-push with lease (after rebase or amend). Preflight still blocks the default branch.",
     )
+    parser.add_argument(
+        "--allow-escaped-backticks",
+        action="store_true",
+        help="Allow literal escaped backticks in the PR body.",
+    )
     return parser.parse_args(argv)
 
 
 def main() -> None:
     args = parse_args()
+
+    code = validate_pr_body_markdown(
+        args.body, allow_escaped_backticks=args.allow_escaped_backticks
+    )
+    if code != 0:
+        sys.exit(code)
 
     code = preflight()
     if code != 0:
