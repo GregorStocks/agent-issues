@@ -17,9 +17,13 @@ def _gh_result(stdout: str, returncode: int = 0, stderr: str = "") -> CompletedP
     return CompletedProcess(args=["gh"], returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def _feedback(formatted: str, seconds_old: float = 0.0) -> dict:
+def _feedback(formatted: str, seconds_old: float = 0.0, id: str | None = None) -> dict:
     now = datetime.now(timezone.utc)
-    return {"formatted": formatted, "created_at": now - timedelta(seconds=seconds_old)}
+    return {
+        "id": id if id is not None else f"test:{formatted}",
+        "formatted": formatted,
+        "created_at": now - timedelta(seconds=seconds_old),
+    }
 
 
 def test_get_pr_lifecycle_state_reports_merged() -> None:
@@ -174,6 +178,36 @@ def test_main_exits_0_after_45_min_with_no_eyes(capsys) -> None:
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
     assert "No codex review after 45 min" in out
+
+
+def test_relocated_inline_comment_does_not_count_as_new(capsys) -> None:
+    """An old inline comment relocated by GitHub after a force-push has the same id
+    but a different formatted string; tracking by id keeps it out of new_feedback."""
+    passing_checks = [{"name": "lint", "bucket": "pass", "link": "l"}]
+    plus_one = [{"content": "+1"}]
+    baseline = [_feedback("[INLINE] @codex on file.py:10: please fix", id="inline:42", seconds_old=600)]
+    relocated = [_feedback("[INLINE] @codex on file.py:12: please fix", id="inline:42", seconds_old=600)]
+
+    with (
+        patch.object(sys, "argv", ["issue-watch-pr", "123"]),
+        patch.object(issue_watch_pr, "get_repo_nwo", return_value="owner/repo"),
+        patch.object(issue_watch_pr, "get_pr_lifecycle_state", return_value="open"),
+        patch.object(issue_watch_pr, "check_merge_conflict", return_value=False),
+        patch.object(
+            issue_watch_pr,
+            "get_review_feedback",
+            side_effect=[baseline, relocated],
+        ),
+        patch.object(issue_watch_pr, "get_checks", return_value=passing_checks),
+        patch.object(issue_watch_pr, "get_pr_reactions", return_value=plus_one),
+        patch.object(issue_watch_pr.time, "sleep"),
+        patch.object(issue_watch_pr.time, "monotonic", return_value=0.0),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        issue_watch_pr.main()
+
+    assert excinfo.value.code == 0
+    assert "new review comment" not in capsys.readouterr().out
 
 
 def test_main_does_not_exit_when_plus_one_but_ci_still_pending() -> None:
