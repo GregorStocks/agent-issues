@@ -24,20 +24,51 @@ def test_parses_title_and_body() -> None:
     assert args.body == "B"
     assert args.draft is False
     assert args.base is None
+    assert args.allow_escaped_backticks is False
 
 
 def test_parses_optional_flags() -> None:
     args = agent_submit.parse_args(
-        ["--title", "T", "--body", "B", "--draft", "--base", "develop", "--force"]
+        [
+            "--title",
+            "T",
+            "--body",
+            "B",
+            "--draft",
+            "--base",
+            "develop",
+            "--force",
+            "--allow-escaped-backticks",
+        ]
     )
     assert args.draft is True
     assert args.base == "develop"
     assert args.force is True
+    assert args.allow_escaped_backticks is True
 
 
 def test_force_defaults_to_false() -> None:
     args = agent_submit.parse_args(["--title", "T", "--body", "B"])
     assert args.force is False
+
+
+def test_validate_pr_body_markdown_rejects_escaped_backticks(capsys) -> None:
+    code = agent_submit.validate_pr_body_markdown(r"Use \`agent-submit\`")
+    assert code == agent_submit.EXIT_PREFLIGHT
+    assert "escaped inline-code" in capsys.readouterr().out
+
+
+def test_validate_pr_body_markdown_allows_other_escapes() -> None:
+    assert agent_submit.validate_pr_body_markdown(r"\*literal\* and regex \.") == 0
+
+
+def test_validate_pr_body_markdown_allows_literal_escaped_backticks_with_flag() -> None:
+    assert (
+        agent_submit.validate_pr_body_markdown(
+            r"Document literal syntax like \`code\`", allow_escaped_backticks=True
+        )
+        == 0
+    )
 
 
 def test_push_omits_force_by_default() -> None:
@@ -119,6 +150,25 @@ def test_upsert_pr_creates_when_none_exists() -> None:
     assert "--draft" not in calls[1]
 
 
+def test_upsert_pr_creates_with_body_unchanged() -> None:
+    results = [
+        _result(stdout="[]"),  # gh pr list
+        _result(stdout="https://github.com/o/r/pull/7\n"),  # gh pr create
+    ]
+    with patch.object(agent_submit, "_run", side_effect=results) as run_mock:
+        agent_submit.upsert_pr(
+            branch="feature-x",
+            base="main",
+            title="T",
+            body=r"## Summary" "\n\n" r"- Keep \*literal\* text",
+            draft=False,
+        )
+    create_call = run_mock.call_args_list[1].args[0]
+    assert create_call[create_call.index("--body") + 1] == (
+        r"## Summary" "\n\n" r"- Keep \*literal\* text"
+    )
+
+
 def test_upsert_pr_creates_draft_when_flag_set() -> None:
     results = [
         _result(stdout="[]"),
@@ -149,6 +199,22 @@ def test_upsert_pr_edits_when_one_exists() -> None:
     assert "5" in edit_call
     # --draft must NOT be passed on edit
     assert "--draft" not in edit_call
+
+
+def test_upsert_pr_edits_with_body_unchanged() -> None:
+    import json as _json
+
+    results = [
+        _result(stdout=_json.dumps([{"number": 5}])),
+        _result(stdout=""),  # gh pr edit
+        _result(stdout="https://github.com/o/r/pull/5\n"),  # gh pr view for URL
+    ]
+    with patch.object(agent_submit, "_run", side_effect=results) as run_mock:
+        agent_submit.upsert_pr(
+            branch="feature-x", base="main", title="T", body=r"Use \*literal\*", draft=True
+        )
+    edit_call = run_mock.call_args_list[1].args[0]
+    assert edit_call[edit_call.index("--body") + 1] == r"Use \*literal\*"
 
 
 def test_upsert_pr_aborts_when_multiple_open_prs(capsys) -> None:
@@ -204,6 +270,49 @@ def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
     assert exc.value.code == 2
     watcher_mock.assert_called_once_with(pr="42")
     push_mock.assert_called_once_with(force=False)
+
+
+def test_main_exits_early_on_invalid_markdown_body(capsys) -> None:
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", r"Use \`code\`"]),
+        patch.object(agent_submit, "preflight") as preflight_mock,
+        patch.object(agent_submit, "_push") as push_mock,
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+    assert exc.value.code == agent_submit.EXIT_PREFLIGHT
+    assert "escaped inline-code" in capsys.readouterr().out
+    preflight_mock.assert_not_called()
+    push_mock.assert_not_called()
+
+
+def test_main_allows_escaped_backticks_with_flag() -> None:
+    from agent_issues.cli import issue_watch_pr
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "agent-submit",
+                "--title",
+                "T",
+                "--body",
+                r"Use \`code\`",
+                "--allow-escaped-backticks",
+            ],
+        ),
+        patch.object(agent_submit, "preflight", return_value=0) as preflight_mock,
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_push", return_value=0),
+        patch.object(agent_submit, "upsert_pr", return_value="42"),
+        patch.object(issue_watch_pr, "run", return_value=0),
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+    assert exc.value.code == 0
+    preflight_mock.assert_called_once()
 
 
 def test_main_passes_force_flag_to_push() -> None:
