@@ -151,9 +151,16 @@ def _parse_ts(ts: str) -> datetime:
 
 
 def get_review_feedback(pr: str, nwo: str) -> list[dict]:
-    """Return non-author review/comment feedback with timestamps.
+    """Return non-author review/comment feedback with stable IDs and timestamps.
 
-    Each item: {"formatted": str, "created_at": datetime}.
+    Each item: {"id": str, "formatted": str, "created_at": datetime}.
+
+    The "id" prefixes the upstream identifier with a source tag
+    ("review:", "comment:", "inline:") so callers can compare items
+    across polls without confusing IDs from different namespaces. The
+    "formatted" string can shift between polls — for inline comments
+    GitHub relocates them to new line numbers after a force-push — so
+    callers MUST track items by "id", not by "formatted".
     """
     result = run_gh("pr", "view", pr, "--json", "author,reviews,comments")
     assert result.returncode == 0, f"Failed to fetch PR details: {result.stderr}"
@@ -173,11 +180,22 @@ def get_review_feedback(pr: str, nwo: str) -> list[dict]:
         body = review.get("body")
         body = body.strip() if body else None
         ts = _parse_ts(review["submittedAt"])
+        review_id = f"review:{review['id']}"
         if body:
-            feedback.append({"formatted": f"[{state}] @{author}: {body}", "created_at": ts})
+            feedback.append(
+                {
+                    "id": review_id,
+                    "formatted": f"[{state}] @{author}: {body}",
+                    "created_at": ts,
+                }
+            )
         else:
             feedback.append(
-                {"formatted": f"[{state}] @{author} (see inline comments)", "created_at": ts}
+                {
+                    "id": review_id,
+                    "formatted": f"[{state}] @{author} (see inline comments)",
+                    "created_at": ts,
+                }
             )
 
     comments = data.get("comments") or []
@@ -190,28 +208,35 @@ def get_review_feedback(pr: str, nwo: str) -> list[dict]:
         if not body:
             continue
         ts = _parse_ts(comment["createdAt"])
-        feedback.append({"formatted": f"[COMMENT] @{author}: {body}", "created_at": ts})
+        feedback.append(
+            {
+                "id": f"comment:{comment['id']}",
+                "formatted": f"[COMMENT] @{author}: {body}",
+                "created_at": ts,
+            }
+        )
 
     inline_result = run_gh(
         "api",
         "--paginate",
         f"repos/{nwo}/pulls/{pr}/comments",
         "--jq",
-        ".[] | [.user.login, .path, (.line | tostring), .body, .created_at] | @tsv",
+        ".[] | [(.id | tostring), .user.login, .path, (.line | tostring), .body, .created_at] | @tsv",
     )
     assert inline_result.returncode == 0, (
         f"Failed to fetch inline comments: {inline_result.stderr}"
     )
     if inline_result.stdout.strip():
         for line in inline_result.stdout.strip().split("\n"):
-            parts = line.split("\t", 4)
-            if len(parts) < 5:
+            parts = line.split("\t", 5)
+            if len(parts) < 6:
                 continue
-            author, path, line_no, body, created_at = parts
+            comment_id, author, path, line_no, body, created_at = parts
             if author == pr_author:
                 continue
             feedback.append(
                 {
+                    "id": f"inline:{comment_id}",
                     "formatted": f"[INLINE] @{author} on {path}:{line_no}: {body.strip()}",
                     "created_at": _parse_ts(created_at),
                 }
@@ -261,8 +286,8 @@ def run(pr: str | None = None) -> int:
             print("\nPR was closed without merging.", flush=True)
             return 1
 
-        baseline_feedback = {f["formatted"] for f in get_review_feedback(pr, nwo)}
-        _log(logging.INFO, "baseline feedback count=%s items=%s", len(baseline_feedback), sorted(baseline_feedback))
+        baseline_feedback = {f["id"] for f in get_review_feedback(pr, nwo)}
+        _log(logging.INFO, "baseline feedback count=%s ids=%s", len(baseline_feedback), sorted(baseline_feedback))
 
         start = time.monotonic()
         eyes_seen = False
@@ -318,7 +343,7 @@ def run(pr: str | None = None) -> int:
                 eyes_seen = True
 
             all_feedback = get_review_feedback(pr, nwo)
-            new_feedback = [f for f in all_feedback if f["formatted"] not in baseline_feedback]
+            new_feedback = [f for f in all_feedback if f["id"] not in baseline_feedback]
             oldest_feedback_age = None
             if new_feedback:
                 oldest = min(f["created_at"] for f in new_feedback)
