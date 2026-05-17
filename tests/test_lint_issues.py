@@ -30,6 +30,15 @@ def test_passes_on_valid_issue(tmp_path: Path) -> None:
     assert issue_lint.lint_issues(tmp_path) == []
 
 
+def test_passes_on_valid_p0_issue(tmp_path: Path) -> None:
+    issues_dir = tmp_path / "issues"
+    issues_dir.mkdir()
+    issue = _make_valid_issue()
+    issue["priority"] = 0
+    _write_issue(issues_dir, "p0-good-issue", issue)
+    assert issue_lint.lint_issues(tmp_path) == []
+
+
 def test_passes_with_optional_fields(tmp_path: Path) -> None:
     issues_dir = tmp_path / "issues"
     issues_dir.mkdir()
@@ -105,7 +114,17 @@ def test_catches_missing_required_prefix(tmp_path: Path) -> None:
     issues_dir.mkdir()
     _write_issue(issues_dir, "bad-issue", _make_valid_issue())
     errors = issue_lint.lint_issues(tmp_path)
-    assert any("filename must start with p1-/p2-/p3-/p4-/blocked-" in e for e in errors)
+    assert any("filename must start with p0-/p1-/p2-/p3-/p4-/blocked-" in e for e in errors)
+
+
+def test_catches_priority_above_supported_range(tmp_path: Path) -> None:
+    issues_dir = tmp_path / "issues"
+    issues_dir.mkdir()
+    issue = _make_valid_issue()
+    issue["priority"] = 5
+    _write_issue(issues_dir, "p5-bad-issue", issue)
+    errors = issue_lint.lint_issues(tmp_path)
+    assert any("priority must be int 0-4" in e for e in errors)
 
 
 def test_catches_legacy_json_extension(tmp_path: Path) -> None:

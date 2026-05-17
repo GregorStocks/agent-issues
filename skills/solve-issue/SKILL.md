@@ -28,7 +28,7 @@ If either exists, read it and follow its instructions alongside this workflow. T
 1. **Resolve a user-supplied issue argument** — only if the user explicitly passed an issue name/path. Use your judgment to determine the issue file they very obviously meant before invoking the claim script.
 
    Canonicalize the argument to the basename expected by `issue-autoclaim`:
-   - Issue filenames are prefixed `p1-...`, `p2-...`, `p3-...`, `p4-...`, or `blocked-...`
+   - Issue filenames are prefixed `p0-...`, `p1-...`, `p2-...`, `p3-...`, `p4-...`, or `blocked-...`
    - If they passed `issues/<name>.json5`, strip the leading `issues/`
    - If they passed `<name>` without `.json5`, try `<name>.json5`
    - If they passed a path or near-exact basename that uniquely identifies one file under `issues/`, use that file's basename
