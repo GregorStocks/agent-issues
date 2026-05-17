@@ -23,7 +23,9 @@ REQUIRED_FIELDS = {
 OPTIONAL_FIELDS = {"blocked"}
 
 KNOWN_FIELDS = REQUIRED_FIELDS | OPTIONAL_FIELDS
-FILENAME_RE = re.compile(r"^(p[1-4]|blocked)-[a-z0-9][a-z0-9-]*$")
+PRIORITY_PREFIXES = ("p0", "p1", "p2", "p3", "p4")
+PRIORITY_PREFIX_LIST = "/".join(f"{prefix}-" for prefix in PRIORITY_PREFIXES)
+FILENAME_RE = re.compile(r"^(p[0-4]|blocked)-[a-z0-9][a-z0-9-]*$")
 
 
 def _expected_filename_prefix(issue: dict) -> str:
@@ -61,7 +63,7 @@ def lint_issues(project_root: Path) -> list[str]:
 
         if not FILENAME_RE.fullmatch(issue_file.stem):
             errors.append(
-                f"{issue_file.name}: filename must start with p1-/p2-/p3-/p4-/blocked- and use kebab-case"
+                f"{issue_file.name}: filename must start with {PRIORITY_PREFIX_LIST}/blocked- and use kebab-case"
             )
         else:
             expected_prefix = _expected_filename_prefix(issue)
@@ -76,9 +78,9 @@ def lint_issues(project_root: Path) -> list[str]:
                 f"{issue_file.name}: status is '{issue['status']}' (delete resolved issues)"
             )
 
-        if not isinstance(issue["priority"], int) or not 1 <= issue["priority"] <= 4:
+        if not isinstance(issue["priority"], int) or not 0 <= issue["priority"] <= 4:
             errors.append(
-                f"{issue_file.name}: priority must be int 1-4, got {issue['priority']}"
+                f"{issue_file.name}: priority must be int 0-4, got {issue['priority']}"
             )
 
         if not isinstance(issue["labels"], list):

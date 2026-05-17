@@ -21,7 +21,7 @@ Examples:
 - `/submit-pr p2-fix-timeout.json5` — filename form also accepted.
 - `/submit-pr issues/p2-fix-timeout.json5` — path form also accepted.
 
-**Normalize each argument to a canonical key.** Issue files get renamed across `blocked-…` / `p1-…` / `p2-…` / `p3-…` / `p4-…` prefixes during the branch's lifetime (e.g., unblocking an issue renames `blocked-foo.json5` → `p2-foo.json5`), so you cannot use the argument as a basename directly. Derive the canonical key by (a) stripping any leading `issues/`, (b) stripping any trailing `.json5`, and (c) stripping any leading `p1-`, `p2-`, `p3-`, `p4-`, or `blocked-` prefix. For `p2-fix-timeout` the canonical key is `fix-timeout`; for `blocked-fix-timeout` it's also `fix-timeout`.
+**Normalize each argument to a canonical key.** Issue files get renamed across `blocked-…` / `p0-…` / `p1-…` / `p2-…` / `p3-…` / `p4-…` prefixes during the branch's lifetime (e.g., unblocking an issue renames `blocked-foo.json5` → `p2-foo.json5`), so you cannot use the argument as a basename directly. Derive the canonical key by (a) stripping any leading `issues/`, (b) stripping any trailing `.json5`, and (c) stripping any leading `p0-`, `p1-`, `p2-`, `p3-`, `p4-`, or `blocked-` prefix. For `p2-fix-timeout` the canonical key is `fix-timeout`; for `blocked-fix-timeout` it's also `fix-timeout`.
 
 For each canonical key, locate the issue file:
 

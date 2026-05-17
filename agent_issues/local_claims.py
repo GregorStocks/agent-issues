@@ -12,7 +12,7 @@ from typing import Any
 from agent_issues.issue_files import issue_stem, iter_issue_files
 
 CLAIMS_ROOT_RELATIVE = Path("coordination") / "claims-v1"
-ISSUE_PREFIXES = ("p1-", "p2-", "p3-", "p4-", "blocked-")
+ISSUE_PREFIXES = ("p0-", "p1-", "p2-", "p3-", "p4-", "blocked-")
 
 
 @dataclass(frozen=True)

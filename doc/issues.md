@@ -1,6 +1,6 @@
 # Issues
 
-Issues are stored as individual JSON5 files in the `issues/` directory at the root of a repository. The filename serves as the issue ID and must start with `p1-`, `p2-`, `p3-`, `p4-`, or `blocked-` (e.g., `p3-fix-login-redirect.json5`).
+Issues are stored as individual JSON5 files in the `issues/` directory at the root of a repository. The filename serves as the issue ID and must start with `p0-`, `p1-`, `p2-`, `p3-`, `p4-`, or `blocked-` (e.g., `p3-fix-login-redirect.json5`).
 
 For intentionally related issue series, include a stable sequencing token in the filename after that prefix so `ls issues/` keeps the set grouped and ordered. Example: `blocked-migration-step5.json5` and later `p3-migration-step5.json5`.
 
@@ -30,7 +30,7 @@ Use real timestamps (the actual time you're creating the issue), not `00:00:00` 
 | `title` | string | Short summary |
 | `description` | string | Full description with context |
 | `status` | string | Always "open" (delete closed issues) |
-| `priority` | int | 1 (highest) to 4 (lowest) |
+| `priority` | int | 0 (highest) to 4 (lowest) |
 | `type` | string | Usually "task" |
 | `labels` | string[] | Tags for categorization |
 | `created_at` | string | ISO 8601 timestamp |
