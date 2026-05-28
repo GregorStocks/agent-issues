@@ -62,7 +62,7 @@ For each canonical key, locate the issue file:
    )"
    ```
 
-  Do not proceed to step 5 or declare victory until agent-submit has actually exited. If you notice that CI is passing and agent-submit has not exited, we are likely still be waiting for review.
+  Do not proceed to step 5 or declare victory until agent-submit has actually exited. If you run it through a command wrapper that has its own timeout, set that wrapper timeout above agent-submit's internal watcher timeout, preferably at least 70 minutes. A shorter wrapper timeout hides agent-submit's actionable exit code and timeout guidance. If you notice that CI is passing and agent-submit has not exited, we are likely still waiting for review.
 
 5. **Interpret the exit code:**
 
@@ -71,7 +71,7 @@ For each canonical key, locate the issue file:
    | 0     | All clean. Done — exit the loop.                                                          |
    | 1     | CI failed or merge conflict. If merge conflict, merge the default branch and resolve. Otherwise use `gh run view <run-id> --log-failed` (ID from the printed link) to find the failure, fix the root cause, commit, then loop back to step 1. |
    | 2     | Review feedback arrived. Read the printed feedback; for inline comments fetch full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each comment, commit, then loop back to step 1. |
-   | 4     | Watcher timed out — **terminal**. Do not re-run automatically; stop and tell the user. |
+   | 4     | Watcher timed out. Stop and consult the user before continuing. If the user asks you to continue later, first inspect and address any PR feedback that arrived while stopped, then re-run `agent-submit`; do not replace it with manual PR watching via `gh` or connector tools. |
    | 10+   | Preflight failed (on default branch, dirty working tree, not a git repo, etc.). Fix and loop back to step 1. |
 
 6. **Cap at 10 iterations.** If after 10 fix-and-resubmit rounds CI still fails or new feedback keeps arriving, report the situation to the user and stop.

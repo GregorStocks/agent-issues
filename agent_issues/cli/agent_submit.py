@@ -157,8 +157,11 @@ def _print_next_step(code: int) -> None:
         )
     elif code == 4:
         print(
-            "\nNEXT STEP: Watcher timed out — likely all fine but didn't confirm. "
-            "Do not re-run automatically; stop and wait for the user.",
+            "\nNEXT STEP: agent-submit timed out while waiting for CI/review confirmation. "
+            "Stop and consult the user before continuing. If the user asks you "
+            "to continue later, first inspect and address any PR feedback that "
+            "arrived while stopped, then re-run agent-submit rather than replacing "
+            "it with manual PR watching via gh or connector tools.",
             flush=True,
         )
 

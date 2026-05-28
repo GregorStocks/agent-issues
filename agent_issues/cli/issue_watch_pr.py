@@ -408,8 +408,15 @@ def run(pr: str | None = None) -> int:
 
             if elapsed > TIMEOUT:
                 _log(logging.WARNING, "poll=%s exiting with timeout pending=%s", poll_count, pending)
+                pending_text = ", ".join(pending) if pending else "none"
                 print(
-                    f"\nTimed out after {TIMEOUT}s. Still pending: {', '.join(pending)}",
+                    f"\nTimed out after {TIMEOUT}s waiting for CI/review confirmation. "
+                    f"Still pending: {pending_text}. "
+                    "If this was run through agent-submit, stop and consult the user "
+                    "before continuing. If the user asks you to continue later, first "
+                    "inspect and address any PR feedback that arrived while stopped, "
+                    "then re-run agent-submit rather than replacing it with manual PR "
+                    "watching.",
                     flush=True,
                 )
                 return 4

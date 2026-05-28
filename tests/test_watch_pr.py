@@ -180,6 +180,31 @@ def test_main_exits_0_after_45_min_with_no_eyes(capsys) -> None:
     assert "No codex review after 45 min" in out
 
 
+def test_main_exits_4_with_retry_guidance_after_overall_timeout(capsys) -> None:
+    pending_checks = [{"name": "lint", "bucket": "pending", "link": "l"}]
+    eyes = [{"content": "eyes"}]
+    with (
+        patch.object(sys, "argv", ["issue-watch-pr", "123"]),
+        patch.object(issue_watch_pr, "get_repo_nwo", return_value="owner/repo"),
+        patch.object(issue_watch_pr, "get_pr_lifecycle_state", return_value="open"),
+        patch.object(issue_watch_pr, "check_merge_conflict", return_value=False),
+        patch.object(issue_watch_pr, "get_review_feedback", return_value=[]),
+        patch.object(issue_watch_pr, "get_checks", return_value=pending_checks),
+        patch.object(issue_watch_pr, "get_pr_reactions", return_value=eyes),
+        patch.object(issue_watch_pr.time, "monotonic", side_effect=[0.0, issue_watch_pr.TIMEOUT + 1]),
+        pytest.raises(SystemExit) as excinfo,
+    ):
+        issue_watch_pr.main()
+
+    assert excinfo.value.code == 4
+    out = capsys.readouterr().out
+    assert "Timed out" in out
+    assert "consult the user" in out
+    assert "feedback that arrived while stopped" in out
+    assert "re-run agent-submit" in out
+    assert "manual PR watching" in out
+
+
 def test_relocated_inline_comment_does_not_count_as_new(capsys) -> None:
     """An old inline comment relocated by GitHub after a force-push has the same id
     but a different formatted string; tracking by id keeps it out of new_feedback."""
