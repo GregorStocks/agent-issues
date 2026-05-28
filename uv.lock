@@ -8,14 +8,18 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "pyjson5" },
+]
+
+[package.dev-dependencies]
+dev = [
     { name = "pytest" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "pyjson5", specifier = ">=1.6" },
-    { name = "pytest", specifier = ">=8.0" },
-]
+requires-dist = [{ name = "pyjson5", specifier = ">=1.6" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "colorama"
