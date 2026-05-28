@@ -246,7 +246,10 @@ def test_next_step_footer_for_exit_4(capsys) -> None:
     agent_submit._print_next_step(4)
     out = capsys.readouterr().out
     assert "timed out" in out.lower()
-    assert "wait for the user" in out.lower()
+    assert "consult the user" in out.lower()
+    assert "feedback that arrived while stopped" in out
+    assert "re-run agent-submit" in out.lower()
+    assert "manual PR watching" in out
 
 
 def test_next_step_footer_silent_on_exit_0(capsys) -> None:
