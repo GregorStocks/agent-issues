@@ -4,7 +4,7 @@
 skills, and hook behavior have stable targets. Add an agent-issues bootstrap \
 command for consumer repositories. It should create or update only minimal \
 scaffolding such as an issues/.gitignore that keeps an otherwise-empty issue \
-directory present using * and !.gitignore patterns, optional AGENTS.md and \
+directory present without changing ignore behavior, optional AGENTS.md and \
 CLAUDE.md includes, optional local skill-note templates, optional hook \
 settings, and optional Makefile or CI snippets. The command should support \
 dry-run output, detect existing files, avoid overwriting non-generated \

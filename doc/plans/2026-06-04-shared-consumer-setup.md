@@ -64,11 +64,11 @@ specific to `infallible-record`.
    code in consumer repos.
 
 6. **Add a consumer bootstrap command.** Add `agent-issues init` or equivalent
-   to create minimal repo scaffolding non-destructively: an `issues/.gitignore`
-   with `*` and `!.gitignore` patterns when an otherwise-empty issue directory
-   needs to be present, optional `AGENTS.md` / `CLAUDE.md`, optional local skill
-   notes, optional hook settings, and optional Makefile/CI snippets. It should
-   support dry-run and refuse to overwrite non-generated content.
+   to create minimal repo scaffolding non-destructively: an empty
+   `issues/.gitignore` when an otherwise-empty issue directory needs to be
+   present, optional `AGENTS.md` / `CLAUDE.md`, optional local skill notes,
+   optional hook settings, and optional Makefile/CI snippets. It should support
+   dry-run and refuse to overwrite non-generated content.
 
 7. **Migrate consumers in small PRs.** For each existing consumer repo, split
    migration into separate PRs: shared instruction include, local skill shrink,
