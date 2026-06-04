@@ -1,0 +1,23 @@
+{
+  "title": "Consumer setup step 4: extract shared pre-tool hooks",
+  "description": "Step 4 of the consumer setup sequence. Move duplicated \
+PreToolUse hook behavior from consumer repos into an agent-issues CLI runner. \
+Use /home/gregor/code/library-of-leng/leng_tools/pre_tool_hook.py and \
+/home/gregor/code/ramekin/.claude/hooks/pre-tool-hook.py as source examples. \
+The shared runner should parse shell commands robustly, block raw PR \
+publishing, block GitHub Issue commands, enforce long timeouts for \
+agent-submit and long-running generators, guard branch switching, block \
+kill-by-name commands, and protect configured generated-output paths. Consumer \
+repos should provide declarative config for repo-specific paths, make targets, \
+signoff environment variables, and project-specific binary blocks.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "labels": [
+    "hooks",
+    "consumer-setup",
+    "step4",
+  ],
+  "created_at": "2026-06-04T07:16:25-07:00",
+  "updated_at": "2026-06-04T07:16:25-07:00",
+}

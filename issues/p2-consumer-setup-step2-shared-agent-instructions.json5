@@ -1,0 +1,23 @@
+{
+  "title": "Consumer setup step 2: publish shared agent instructions",
+  "description": "Step 2 of the consumer setup sequence, after \
+GregorStocks/agent-issues has self-validation. Move framework-level \
+instructions out of consumer AGENTS.md files and into a shared document \
+shipped by agent-issues. The shared content should cover issue schema, local \
+issue lifecycle, standard CLI commands, PR submission policy, branch policy, \
+and temp/log guidance. Update install.sh to insert a single include line into \
+the user's global Claude/Codex agent file if it is absent, without deleting or \
+rewriting existing user content. This prepares library-of-leng, \
+infallible-record, and ramekin to stop duplicating framework text locally.",
+  "status": "open",
+  "priority": 2,
+  "type": "task",
+  "labels": [
+    "docs",
+    "installer",
+    "consumer-setup",
+    "step2",
+  ],
+  "created_at": "2026-06-04T07:16:25-07:00",
+  "updated_at": "2026-06-04T07:16:25-07:00",
+}
