@@ -1,0 +1,22 @@
+{
+  "title": "Consumer setup step 5: add init command",
+  "description": "Step 5 of the consumer setup sequence, after shared docs, \
+skills, and hook behavior have stable targets. Add an agent-issues bootstrap \
+command for consumer repositories. It should create or update only minimal \
+scaffolding such as issues/.gitkeep, optional AGENTS.md and CLAUDE.md \
+includes, optional local skill-note templates, optional hook settings, and \
+optional Makefile or CI snippets. The command should support dry-run output, \
+detect existing files, avoid overwriting non-generated content, and keep \
+generated setup PRs small. It should be suitable for future repos and for \
+auditing library-of-leng, infallible-record, and ramekin migrations.",
+  "status": "open",
+  "priority": 3,
+  "type": "task",
+  "labels": [
+    "cli",
+    "consumer-setup",
+    "step5",
+  ],
+  "created_at": "2026-06-04T07:16:25-07:00",
+  "updated_at": "2026-06-04T07:16:25-07:00",
+}

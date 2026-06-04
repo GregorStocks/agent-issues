@@ -1,0 +1,24 @@
+{
+  "title": "Consumer setup step 6: migrate existing consumers",
+  "description": "Step 6 of the consumer setup sequence, after shared \
+instructions, local-skill templates, the pre-tool hook runner, and the init \
+command exist. Migrate the existing consumer repositories in small focused \
+PRs: /home/gregor/code/library-of-leng (GregorStocks/library-of-leng), \
+/home/gregor/code/infallible-record (the repo from \
+GregorStocks/infallible-record#18), and /home/gregor/code/ramekin \
+(GregorStocks/ramekin). Each repo should stop duplicating framework behavior \
+in AGENTS.md, docs/issues.md or doc/issues.md, create-pr-local, \
+solve-issue-local, and PreToolUse hook code. Split each migration by concern \
+so no setup PR repeats the size or breadth of \
+GregorStocks/infallible-record#18.",
+  "status": "open",
+  "priority": 3,
+  "type": "task",
+  "labels": [
+    "consumer-setup",
+    "migration",
+    "step6",
+  ],
+  "created_at": "2026-06-04T07:16:25-07:00",
+  "updated_at": "2026-06-04T07:16:25-07:00",
+}
