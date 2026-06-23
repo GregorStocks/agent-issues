@@ -32,3 +32,6 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Validate issues
+        run: uv run issue-lint
