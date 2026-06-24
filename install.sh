@@ -38,7 +38,8 @@ for skill_dir in "$SKILLS_DIR"/*/; do
 done
 
 # Codex global skills
-CODEX_SKILLS="$HOME/.codex/skills"
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+CODEX_SKILLS="$CODEX_HOME_DIR/skills"
 mkdir -p "$CODEX_SKILLS"
 
 for skill_dir in "$SKILLS_DIR"/*/; do
