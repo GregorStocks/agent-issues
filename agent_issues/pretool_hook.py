@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import shlex
 import subprocess
 from collections import deque
@@ -144,17 +145,14 @@ def _shell_segments(command: str) -> list[list[str]]:
     return segments
 
 
-def _heredoc_delimiters(tokens: list[str]) -> list[str]:
-    delimiters: list[str] = []
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token in {"<<", "<<-"} and index + 1 < len(tokens):
-            delimiters.append(tokens[index + 1])
-            index += 2
-            continue
-        index += 1
-    return delimiters
+_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_-]*)\1")
+
+
+def _heredoc_specs(command_line: str) -> list[tuple[str, bool]]:
+    return [
+        (match.group(2), bool(match.group(1)))
+        for match in _HEREDOC_RE.finditer(command_line)
+    ]
 
 
 def _strip_heredocs(command: str) -> tuple[str, list[str]]:
@@ -167,8 +165,8 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
     while index < len(lines):
         line = lines[index]
         tokens = _shell_tokens(line) or []
-        delimiters = _heredoc_delimiters(tokens)
-        if not delimiters:
+        specs = _heredoc_specs(line)
+        if not specs:
             output.append(line)
             index += 1
             continue
@@ -182,7 +180,7 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
         output.append(line)
         index += 1
 
-        for delimiter in delimiters:
+        for delimiter, quoted in specs:
             body: list[str] = []
             while index < len(lines):
                 body_line = lines[index]
@@ -193,6 +191,10 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
                 index += 1
             if is_shell:
                 shell_bodies.append("".join(body))
+            elif not quoted:
+                body_text = "".join(body)
+                shell_bodies.extend(_extract_subshells(body_text))
+                shell_bodies.extend(_extract_backticks(body_text))
     return "".join(output), shell_bodies
 
 
@@ -347,7 +349,7 @@ _SHELL_CONTROL_KEYWORDS = {
     "while",
 }
 
-_WRITE_REDIRECTS = {">", ">|", ">>", ">>|", "&>", "&>>", "<>"}
+_WRITE_REDIRECTS = {">", ">|", ">>", ">>|", "&>", "&>>", ">&", "<>"}
 _ALL_REDIRECTS = _WRITE_REDIRECTS | {"<", "<<", "<<-", "<<<"}
 
 
@@ -755,10 +757,14 @@ def _clean_path(path: str) -> str:
     return path.rstrip("/")
 
 
-def _path_matches(path: str, protected: str) -> bool:
+def _path_matches(path: str, protected: str, *, include_ancestors: bool = False) -> bool:
     path = _clean_path(path)
     protected = _clean_path(protected)
-    return path == protected or path.startswith(f"{protected}/")
+    if path == protected or path.startswith(f"{protected}/"):
+        return True
+    if include_ancestors:
+        return path in {"", ".", "/"} or protected.startswith(f"{path}/")
+    return False
 
 
 def _binary_matches(executable: str, basename: str, pattern: str) -> bool:
@@ -766,26 +772,43 @@ def _binary_matches(executable: str, basename: str, pattern: str) -> bool:
     return fnmatch.fnmatch(normalized, pattern) or fnmatch.fnmatch(basename, pattern)
 
 
-def _arg_targets_generated(arg: str, paths: tuple[str, ...]) -> bool:
+def _arg_targets_generated(
+    arg: str,
+    paths: tuple[str, ...],
+    *,
+    include_ancestors: bool = False,
+) -> bool:
     arg = arg.split("=", 1)[-1] if "=" in arg and not arg.startswith("-") else arg
-    return any(_path_matches(arg, path) for path in paths)
+    return any(
+        _path_matches(arg, path, include_ancestors=include_ancestors) for path in paths
+    )
 
 
 def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if not config.generated_paths:
         return False
     if invocation.basename in {"rm", "mv", "cp", "install", "touch", "truncate", "mkdir", "rmdir"}:
-        return any(_arg_targets_generated(arg, config.generated_paths) for arg in invocation.args)
+        return any(
+            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            for arg in invocation.args
+        )
     if invocation.basename == "sed" and any(arg.startswith("-i") for arg in invocation.args):
-        return any(_arg_targets_generated(arg, config.generated_paths) for arg in invocation.args)
+        return any(
+            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            for arg in invocation.args
+        )
     if invocation.basename == "perl" and any(arg.startswith("-pi") for arg in invocation.args):
-        return any(_arg_targets_generated(arg, config.generated_paths) for arg in invocation.args)
+        return any(
+            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            for arg in invocation.args
+        )
     subcommand = _git_subcommand(invocation)
     if subcommand is None:
         return False
     name, rest = subcommand
     return name in {"checkout", "restore", "clean"} and any(
-        _arg_targets_generated(arg, config.generated_paths) for arg in rest
+        _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+        for arg in rest
     )
 
 

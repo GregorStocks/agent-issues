@@ -208,6 +208,15 @@ def test_blocks_shell_redirection_into_generated_paths() -> None:
     )
 
 
+def test_blocks_ampersand_write_redirection_into_generated_paths() -> None:
+    assert "redirect shell output" in (
+        rejection_message("printf x >& data/generated/file.txt", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message(">&/tmp/out git push origin HEAD", _config()) or ""
+    )
+
+
 def test_blocks_redirection_only_writes_into_generated_paths() -> None:
     assert "redirect shell output" in (
         rejection_message("> data/generated/file.txt", _config()) or ""
@@ -215,6 +224,12 @@ def test_blocks_redirection_only_writes_into_generated_paths() -> None:
     assert "redirect shell output" in (
         rejection_message("exec > data/generated/file.txt", _config()) or ""
     )
+
+
+def test_blocks_generated_path_ancestor_mutations() -> None:
+    assert "generated output" in (rejection_message("rm -rf data", _config()) or "")
+    assert "generated output" in (rejection_message("git restore .", _config()) or "")
+    assert "generated output" in (rejection_message("git checkout -- .", _config()) or "")
 
 
 def test_generated_path_matching_handles_absolute_paths() -> None:
@@ -237,6 +252,16 @@ def test_binary_block_matching_handles_absolute_paths() -> None:
 
 def test_heredoc_literal_body_is_not_parsed_as_command() -> None:
     command = "cat <<'EOF' > /tmp/message\n" "git push origin HEAD\n" "EOF\n"
+    assert rejection_message(command, _config()) is None
+
+
+def test_unquoted_heredoc_expansions_are_inspected() -> None:
+    command = "cat <<EOF > /tmp/message\n" "$(git push origin HEAD)\n" "EOF\n"
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
+
+
+def test_quoted_heredoc_expansions_are_literal() -> None:
+    command = "cat <<'EOF' > /tmp/message\n" "$(git push origin HEAD)\n" "EOF\n"
     assert rejection_message(command, _config()) is None
 
 
