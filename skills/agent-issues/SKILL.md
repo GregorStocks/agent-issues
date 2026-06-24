@@ -136,6 +136,76 @@ raw `git push` plus manual `gh pr edit` as a substitute for normal PR updates.
 If CI fails or review feedback arrives, fix the root cause, commit, and submit
 again.
 
+## Local Skill Templates
+
+Repo-local skills should contain only the parts that are specific to that
+repository. Keep PR creation, PR updates, CI watching, review feedback loops,
+timeout handling, local issue claiming, and GitHub Issue policy in the shared
+`create-pr`, `solve-issue`, `submit-pr`, and `agent-issues` skills.
+
+Use this shape for `.claude/skills/create-pr-local/SKILL.md` or
+`.agents/skills/create-pr-local/SKILL.md`:
+
+```markdown
+---
+name: create-pr-local
+description: Repo-specific instructions to use alongside the global create-pr skill.
+---
+
+# Create a Pull Request: Local Notes
+
+Use these notes together with the global `create-pr` skill.
+
+## Pre-Validation
+
+- Read `Makefile` first and prefer existing project targets over direct tool
+  invocations.
+- Before opening a PR, run `<repo test command>` and `<repo lint command>`.
+- If you change generated-output inputs, run `<regeneration command>` and
+  commit intentional generated diffs.
+
+## Repo-Specific Constraints
+
+- Do not hand-edit generated files under `<generated path>`.
+- If validation dirties tracked files, inspect the diff and commit intentional
+  artifacts before creating the PR.
+- If adding a dependency, document the repo-specific selection criteria and any
+  version policy that reviewers expect.
+```
+
+Use this shape for `.claude/skills/solve-issue-local/SKILL.md` or
+`.agents/skills/solve-issue-local/SKILL.md`:
+
+```markdown
+---
+name: solve-issue-local
+description: Repo-specific instructions to use alongside the global solve-issue skill.
+---
+
+# Solve an Issue: Local Notes
+
+Use these notes together with the global `solve-issue` skill.
+
+## Repo-Specific Commands
+
+- Baseline verification is `<repo test command>` and `<repo lint command>`.
+- If you touch `<generated input path>`, run `<regeneration command>` and
+  inspect the generated diff before committing it.
+- If a targeted check exists for the touched area, run it before the full suite.
+
+## Repo-Specific Constraints
+
+- Follow `<domain rule>` when changing `<area>`.
+- Do not hand-edit generated files under `<generated path>`.
+```
+
+Good local skills may also list dependency approval requirements, generated
+artifact commit hygiene, product/domain constraints, or project-specific review
+steps. They should not describe how to call `agent-submit`, how to update PR
+metadata, how to interpret watcher exit codes, how many CI/review loops to run,
+or whether to create GitHub Issues unless the repo deliberately overrides the
+shared policy.
+
 ## Temporary Files And Logs
 
 Put repository-local temporary files under `tmp/` in the worktree unless the
