@@ -144,6 +144,130 @@ def _shell_segments(command: str) -> list[list[str]]:
     return segments
 
 
+def _heredoc_delimiters(tokens: list[str]) -> list[str]:
+    delimiters: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"<<", "<<-"} and index + 1 < len(tokens):
+            delimiters.append(tokens[index + 1])
+            index += 2
+            continue
+        index += 1
+    return delimiters
+
+
+def _strip_heredocs(command: str) -> tuple[str, list[str]]:
+    """Remove literal here-doc bodies and return bodies passed to shells."""
+
+    lines = command.splitlines(keepends=True)
+    output: list[str] = []
+    shell_bodies: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        tokens = _shell_tokens(line) or []
+        delimiters = _heredoc_delimiters(tokens)
+        if not delimiters:
+            output.append(line)
+            index += 1
+            continue
+
+        heredoc_index = min(
+            tokens.index("<<") if "<<" in tokens else len(tokens),
+            tokens.index("<<-") if "<<-" in tokens else len(tokens),
+        )
+        invocation = _unwrap_invocation(tokens[:heredoc_index])
+        is_shell = invocation is not None and invocation.basename in {"sh", "bash", "zsh", "dash"}
+        output.append(line)
+        index += 1
+
+        for delimiter in delimiters:
+            body: list[str] = []
+            while index < len(lines):
+                body_line = lines[index]
+                if body_line.strip() == delimiter:
+                    index += 1
+                    break
+                body.append(body_line)
+                index += 1
+            if is_shell:
+                shell_bodies.append("".join(body))
+    return "".join(output), shell_bodies
+
+
+def _extract_subshells(command: str) -> list[str]:
+    bodies: list[str] = []
+    in_single = False
+    in_double = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and index + 1 < len(command) and not in_single:
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if in_single:
+            index += 1
+            continue
+
+        starts_command_substitution = (
+            char == "$"
+            and index + 1 < len(command)
+            and command[index + 1] == "("
+            and not (index + 2 < len(command) and command[index + 2] == "(")
+        )
+        starts_process_substitution = (
+            char in {"<", ">"}
+            and index + 1 < len(command)
+            and command[index + 1] == "("
+        )
+        if not starts_command_substitution and not starts_process_substitution:
+            index += 1
+            continue
+
+        body_start = index + 2
+        depth = 1
+        cursor = body_start
+        inner_single = False
+        inner_double = False
+        while cursor < len(command):
+            inner = command[cursor]
+            if inner == "\\" and cursor + 1 < len(command) and not inner_single:
+                cursor += 2
+                continue
+            if inner == "'" and not inner_double:
+                inner_single = not inner_single
+                cursor += 1
+                continue
+            if inner == '"' and not inner_single:
+                inner_double = not inner_double
+                cursor += 1
+                continue
+            if inner_single or inner_double:
+                cursor += 1
+                continue
+            if inner == "(":
+                depth += 1
+            elif inner == ")":
+                depth -= 1
+                if depth == 0:
+                    bodies.append(command[body_start:cursor])
+                    index = cursor + 1
+                    break
+            cursor += 1
+        else:
+            index += 1
+    return bodies
+
+
 def _is_env_assignment(token: str) -> bool:
     key, sep, _value = token.partition("=")
     return bool(sep and key and key.replace("_", "A").isalnum() and not key[0].isdigit())
@@ -186,6 +310,7 @@ _SHELL_CONTROL_KEYWORDS = {
 }
 
 _WRITE_REDIRECTS = {">", ">|", ">>", ">>|", "&>", "&>>", "<>"}
+_ALL_REDIRECTS = _WRITE_REDIRECTS | {"<", "<<", "<<-", "<<<"}
 
 
 def _redirection_targets(tokens: list[str]) -> tuple[str, ...]:
@@ -201,12 +326,29 @@ def _redirection_targets(tokens: list[str]) -> tuple[str, ...]:
     return tuple(targets)
 
 
+def _skip_redirection(tokens: list[str], index: int) -> int:
+    if tokens[index] in _ALL_REDIRECTS and index + 1 < len(tokens):
+        return index + 2
+    if (
+        tokens[index].isdigit()
+        and index + 1 < len(tokens)
+        and tokens[index + 1] in _ALL_REDIRECTS
+    ):
+        return index + 3
+    return index
+
+
 def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
     env: dict[str, str] = {}
     redirection_targets = _redirection_targets(tokens)
     index = 0
 
     while index < len(tokens):
+        next_index = _skip_redirection(tokens, index)
+        if next_index != index:
+            index = next_index
+            continue
+
         token = tokens[index]
         if _is_env_assignment(token):
             key, value = token.split("=", 1)
@@ -303,7 +445,12 @@ def _env_split_payload(tokens: list[str]) -> str | None:
 def command_invocations(command: str) -> list[Invocation]:
     """Return executable invocations, following common transparent wrappers."""
 
+    command, shell_heredocs = _strip_heredocs(command)
     invocations: list[Invocation] = []
+    for body in shell_heredocs:
+        invocations.extend(command_invocations(body))
+    for body in _extract_subshells(command):
+        invocations.extend(command_invocations(body))
     for tokens in _shell_segments(command):
         env_payload = _env_split_payload(tokens)
         if env_payload:
@@ -437,6 +584,8 @@ def _branch_target(args: list[str], opts_with_arg: set[str], *, checkout: bool) 
         token = args[index]
         if token == "--":
             return None if checkout else (args[index + 1] if index + 1 < len(args) else None)
+        if token in {"-d", "--detach"}:
+            return args[index + 1] if index + 1 < len(args) else "HEAD"
         if token in opts_with_arg:
             if token in {"-b", "-B", "-c", "-C", "--create", "--force-create", "--orphan"}:
                 return args[index + 1] if index + 1 < len(args) else ""
@@ -539,6 +688,12 @@ def _make_targets(invocation: Invocation) -> list[str]:
 def _clean_path(path: str) -> str:
     path = path.removeprefix(":(top)")
     path = path.removeprefix("./")
+    path_obj = Path(path)
+    if path_obj.is_absolute():
+        try:
+            path = str(path_obj.relative_to(Path.cwd()))
+        except ValueError:
+            path = str(path_obj)
     return path.rstrip("/")
 
 

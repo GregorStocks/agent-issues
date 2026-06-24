@@ -154,9 +154,29 @@ def test_inspects_commands_after_shell_control_keywords() -> None:
     )
 
 
+def test_skips_leading_redirections_before_executable() -> None:
+    assert "agent-submit" in (
+        rejection_message(">/tmp/out git push origin HEAD", _config()) or ""
+    )
+    assert "pkill/killall" in (rejection_message("2>/tmp/e pkill python", _config()) or "")
+
+
+def test_inspects_command_and_process_substitutions() -> None:
+    assert "agent-submit" in (
+        rejection_message("echo $(git push origin HEAD)", _config()) or ""
+    )
+    assert "pkill/killall" in (rejection_message("cat <(pkill python)", _config()) or "")
+
+
 def test_git_switch_guess_does_not_hide_branch_target() -> None:
     assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
         rejection_message("git switch --guess feature", _config()) or ""
+    )
+
+
+def test_git_detach_requires_signoff() -> None:
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=HEAD" in (
+        rejection_message("git switch --detach", _config()) or ""
     )
 
 
@@ -167,6 +187,26 @@ def test_blocks_shell_redirection_into_generated_paths() -> None:
     assert "redirect shell output" in (
         rejection_message("printf x 2>data/generated/error.txt", _config()) or ""
     )
+
+
+def test_generated_path_matching_handles_absolute_paths() -> None:
+    generated_file = Path.cwd() / "data/generated/file.txt"
+    assert "generated output" in (
+        rejection_message(f"rm {generated_file}", _config()) or ""
+    )
+    assert "redirect shell output" in (
+        rejection_message(f"printf x > {generated_file}", _config()) or ""
+    )
+
+
+def test_heredoc_literal_body_is_not_parsed_as_command() -> None:
+    command = "cat <<'EOF' > /tmp/message\n" "git push origin HEAD\n" "EOF\n"
+    assert rejection_message(command, _config()) is None
+
+
+def test_shell_heredoc_body_is_parsed_as_command() -> None:
+    command = "bash <<'EOF'\n" "git push origin HEAD\n" "EOF\n"
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
 
 
 def test_extracts_timeout_from_transcript(tmp_path: Path) -> None:
