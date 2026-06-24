@@ -142,6 +142,33 @@ def test_blocks_previous_branch_shorthand() -> None:
     )
 
 
+def test_inspects_commands_after_shell_control_keywords() -> None:
+    assert "agent-submit" in (
+        rejection_message("if true; then git push origin HEAD; fi", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("{ git push origin HEAD; }", _config()) or ""
+    )
+    assert "pkill/killall" in (
+        rejection_message("while true; do pkill python; done", _config()) or ""
+    )
+
+
+def test_git_switch_guess_does_not_hide_branch_target() -> None:
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
+        rejection_message("git switch --guess feature", _config()) or ""
+    )
+
+
+def test_blocks_shell_redirection_into_generated_paths() -> None:
+    assert "redirect shell output" in (
+        rejection_message("printf x > data/generated/file.txt", _config()) or ""
+    )
+    assert "redirect shell output" in (
+        rejection_message("printf x 2>data/generated/error.txt", _config()) or ""
+    )
+
+
 def test_extracts_timeout_from_transcript(tmp_path: Path) -> None:
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text(

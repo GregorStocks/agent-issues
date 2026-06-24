@@ -99,6 +99,7 @@ class Invocation:
     env: dict[str, str]
     executable: str
     args: tuple[str, ...]
+    redirection_targets: tuple[str, ...] = ()
 
     @property
     def basename(self) -> str:
@@ -162,8 +163,47 @@ def _skip_options(args: list[str], index: int, opts_with_arg: set[str]) -> int:
     return index
 
 
+_SHELL_CONTROL_KEYWORDS = {
+    "!",
+    "(",
+    ")",
+    "{",
+    "}",
+    "case",
+    "do",
+    "done",
+    "elif",
+    "else",
+    "esac",
+    "fi",
+    "for",
+    "if",
+    "in",
+    "select",
+    "then",
+    "until",
+    "while",
+}
+
+_WRITE_REDIRECTS = {">", ">|", ">>", ">>|", "&>", "&>>", "<>"}
+
+
+def _redirection_targets(tokens: list[str]) -> tuple[str, ...]:
+    targets: list[str] = []
+    for index, token in enumerate(tokens):
+        target_index: int | None = None
+        if token in _WRITE_REDIRECTS:
+            target_index = index + 1
+        elif token.isdigit() and index + 1 < len(tokens) and tokens[index + 1] in _WRITE_REDIRECTS:
+            target_index = index + 2
+        if target_index is not None and target_index < len(tokens):
+            targets.append(tokens[target_index])
+    return tuple(targets)
+
+
 def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
     env: dict[str, str] = {}
+    redirection_targets = _redirection_targets(tokens)
     index = 0
 
     while index < len(tokens):
@@ -175,6 +215,9 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
             continue
 
         name = os.path.basename(token)
+        if name in _SHELL_CONTROL_KEYWORDS:
+            index += 1
+            continue
         if name in {"time", "nohup", "command", "builtin", "exec"}:
             index += 1
             index = _skip_options(tokens, index, set())
@@ -218,7 +261,12 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
 
     if index >= len(tokens):
         return None
-    return Invocation(env=env, executable=tokens[index], args=tuple(tokens[index + 1 :]))
+    return Invocation(
+        env=env,
+        executable=tokens[index],
+        args=tuple(tokens[index + 1 :]),
+        redirection_targets=redirection_targets,
+    )
 
 
 def _shell_c_payload(invocation: Invocation) -> str | None:
@@ -379,7 +427,7 @@ def _push_uses_force(args: list[str]) -> bool:
     return False
 
 
-_SWITCH_OPTS_WITH_ARG = {"-c", "-C", "--create", "--force-create", "--guess"}
+_SWITCH_OPTS_WITH_ARG = {"-c", "-C", "--create", "--force-create"}
 _CHECKOUT_OPTS_WITH_ARG = {"-b", "-B", "--orphan", "--pathspec-from-file"}
 
 
@@ -619,6 +667,15 @@ def rejection_message(
                     f"command with {config.branch_switch_signoff_env}={branch_target} "
                     "immediately before git."
                 )
+
+        if config.generated_paths and any(
+            _arg_targets_generated(target, config.generated_paths)
+            for target in invocation.redirection_targets
+        ):
+            return (
+                "Do not redirect shell output into generated output paths. "
+                f"The only supported way to update them is `{config.generated_command}`."
+            )
 
         if _generated_mutation(invocation, config):
             return (
