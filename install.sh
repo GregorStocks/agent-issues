@@ -12,26 +12,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 
-ensure_global_agent_line() {
-    local file="$1"
-    local agent_line="$2"
-
-    mkdir -p "$(dirname "$file")"
-    touch "$file"
-
-    if grep -Fxq "$agent_line" "$file"; then
-        echo "Agent line already present: $file"
-        return
-    fi
-
-    if [ -s "$file" ]; then
-        printf '\n%s\n' "$agent_line" >> "$file"
-    else
-        printf '%s\n' "$agent_line" >> "$file"
-    fi
-    echo "Added agent line: $file -> $agent_line"
-}
-
 if ! command -v uv >/dev/null 2>&1; then
     echo "Error: uv is required to install agent-issues." >&2
     exit 1
@@ -57,8 +37,6 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     echo "Linked: $target -> $skill_dir"
 done
 
-ensure_global_agent_line "$HOME/.claude/CLAUDE.md" "@$HOME/.claude/skills/agent-issues/SKILL.md"
-
 # Codex global skills
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 CODEX_SKILLS="$CODEX_HOME_DIR/skills"
@@ -76,8 +54,6 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     ln -s "$skill_dir" "$target"
     echo "Linked: $target -> $skill_dir"
 done
-
-ensure_global_agent_line "$CODEX_HOME_DIR/AGENTS.md" 'Use the `agent-issues` skill when working in repositories that use the agent-issues local issue workflow.'
 
 echo ""
 echo "Skills installed."

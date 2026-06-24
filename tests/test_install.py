@@ -50,7 +50,7 @@ def _run_install(
     )
 
 
-def test_install_adds_global_agent_issues_guidance(tmp_path: Path) -> None:
+def test_install_links_agent_issues_skill_without_agent_guidance(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     home = tmp_path / "home"
     bin_dir = tmp_path / "bin"
@@ -59,19 +59,13 @@ def test_install_adds_global_agent_issues_guidance(tmp_path: Path) -> None:
 
     _run_install(repo_root, home, bin_dir)
 
-    claude_include = f"@{home}/.claude/skills/agent-issues/SKILL.md"
-    codex_guidance = (
-        "Use the `agent-issues` skill when working in repositories that use the "
-        "agent-issues local issue workflow."
-    )
-
-    assert (home / ".claude/CLAUDE.md").read_text() == f"{claude_include}\n"
-    assert (home / ".codex/AGENTS.md").read_text() == f"{codex_guidance}\n"
     assert (home / ".claude/skills/agent-issues").is_symlink()
     assert (home / ".codex/skills/agent-issues").is_symlink()
+    assert not (home / ".claude/CLAUDE.md").exists()
+    assert not (home / ".codex/AGENTS.md").exists()
 
 
-def test_install_preserves_existing_global_agent_content(tmp_path: Path) -> None:
+def test_install_does_not_rewrite_existing_global_agent_content(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     home = tmp_path / "home"
     bin_dir = tmp_path / "bin"
@@ -88,19 +82,10 @@ def test_install_preserves_existing_global_agent_content(tmp_path: Path) -> None
     _run_install(repo_root, home, bin_dir)
     _run_install(repo_root, home, bin_dir)
 
-    claude_include = f"@{home}/.claude/skills/agent-issues/SKILL.md"
-    codex_guidance = (
-        "Use the `agent-issues` skill when working in repositories that use the "
-        "agent-issues local issue workflow."
-    )
-
-    claude_text = claude_file.read_text()
-    codex_text = codex_file.read_text()
-
-    assert claude_text == f"Existing Claude instructions.\n\n{claude_include}\n"
-    assert codex_text == f"Existing Codex instructions.\n\n{codex_guidance}\n"
-    assert claude_text.count(claude_include) == 1
-    assert codex_text.count(codex_guidance) == 1
+    assert claude_file.read_text() == "Existing Claude instructions.\n"
+    assert codex_file.read_text() == "Existing Codex instructions.\n"
+    assert (home / ".claude/skills/agent-issues").is_symlink()
+    assert (home / ".codex/skills/agent-issues").is_symlink()
 
 
 def test_install_respects_custom_codex_home(tmp_path: Path) -> None:
@@ -113,11 +98,6 @@ def test_install_respects_custom_codex_home(tmp_path: Path) -> None:
 
     _run_install(repo_root, home, bin_dir, codex_home=codex_home)
 
-    codex_guidance = (
-        "Use the `agent-issues` skill when working in repositories that use the "
-        "agent-issues local issue workflow."
-    )
-
-    assert (codex_home / "AGENTS.md").read_text() == f"{codex_guidance}\n"
     assert (codex_home / "skills/agent-issues").is_symlink()
+    assert not (codex_home / "AGENTS.md").exists()
     assert not (home / ".codex").exists()
