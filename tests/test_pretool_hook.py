@@ -126,6 +126,22 @@ def test_recurses_into_shell_c_payload() -> None:
     assert "agent-submit" in message
 
 
+def test_recurses_into_shell_c_option_clusters() -> None:
+    assert "agent-submit" in (
+        rejection_message("bash -lc 'git push origin HEAD'", _config()) or ""
+    )
+    assert "pkill/killall" in (rejection_message("sh -ec 'pkill python'", _config()) or "")
+
+
+def test_blocks_previous_branch_shorthand() -> None:
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=-" in (
+        rejection_message("git switch -", _config()) or ""
+    )
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=-" in (
+        rejection_message("git checkout -", _config()) or ""
+    )
+
+
 def test_extracts_timeout_from_transcript(tmp_path: Path) -> None:
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text(

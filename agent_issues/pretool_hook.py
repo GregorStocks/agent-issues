@@ -230,6 +230,12 @@ def _shell_c_payload(invocation: Invocation) -> str | None:
             return args[index + 1]
         if token.startswith("--command="):
             return token.split("=", 1)[1]
+        if token.startswith("-") and not token.startswith("--") and "c" in token[1:]:
+            command_suffix = token[1:].split("c", 1)[1]
+            if command_suffix:
+                return command_suffix
+            if index + 1 < len(args):
+                return args[index + 1]
     return None
 
 
@@ -388,6 +394,8 @@ def _branch_target(args: list[str], opts_with_arg: set[str], *, checkout: bool) 
                 return args[index + 1] if index + 1 < len(args) else ""
             index += 2
             continue
+        if token == "-":
+            return token
         if token.startswith("-"):
             index += 1
             continue
