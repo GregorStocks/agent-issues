@@ -12,6 +12,26 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 
+ensure_include_line() {
+    local file="$1"
+    local include_line="$2"
+
+    mkdir -p "$(dirname "$file")"
+    touch "$file"
+
+    if grep -Fxq "$include_line" "$file"; then
+        echo "Include already present: $file"
+        return
+    fi
+
+    if [ -s "$file" ]; then
+        printf '\n%s\n' "$include_line" >> "$file"
+    else
+        printf '%s\n' "$include_line" >> "$file"
+    fi
+    echo "Added include: $file -> $include_line"
+}
+
 if ! command -v uv >/dev/null 2>&1; then
     echo "Error: uv is required to install agent-issues." >&2
     exit 1
@@ -37,6 +57,8 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     echo "Linked: $target -> $skill_dir"
 done
 
+ensure_include_line "$HOME/.claude/CLAUDE.md" "@$HOME/.claude/skills/agent-issues/SKILL.md"
+
 # Codex global skills
 CODEX_SKILLS="$HOME/.codex/skills"
 mkdir -p "$CODEX_SKILLS"
@@ -53,6 +75,8 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     ln -s "$skill_dir" "$target"
     echo "Linked: $target -> $skill_dir"
 done
+
+ensure_include_line "$HOME/.codex/AGENTS.md" "@$HOME/.codex/skills/agent-issues/SKILL.md"
 
 echo ""
 echo "Skills installed."
