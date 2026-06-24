@@ -168,6 +168,13 @@ def test_inspects_command_and_process_substitutions() -> None:
     assert "pkill/killall" in (rejection_message("cat <(pkill python)", _config()) or "")
 
 
+def test_inspects_legacy_backtick_substitutions() -> None:
+    assert "agent-submit" in (
+        rejection_message("echo `git push origin HEAD`", _config()) or ""
+    )
+    assert "pkill/killall" in (rejection_message("echo `pkill python`", _config()) or "")
+
+
 def test_git_switch_guess_does_not_hide_branch_target() -> None:
     assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
         rejection_message("git switch --guess feature", _config()) or ""
@@ -180,12 +187,33 @@ def test_git_detach_requires_signoff() -> None:
     )
 
 
+def test_attached_branch_create_options_require_signoff() -> None:
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
+        rejection_message("git switch -cfeature", _config()) or ""
+    )
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
+        rejection_message("git switch --create=feature", _config()) or ""
+    )
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
+        rejection_message("git checkout -bfeature", _config()) or ""
+    )
+
+
 def test_blocks_shell_redirection_into_generated_paths() -> None:
     assert "redirect shell output" in (
         rejection_message("printf x > data/generated/file.txt", _config()) or ""
     )
     assert "redirect shell output" in (
         rejection_message("printf x 2>data/generated/error.txt", _config()) or ""
+    )
+
+
+def test_blocks_redirection_only_writes_into_generated_paths() -> None:
+    assert "redirect shell output" in (
+        rejection_message("> data/generated/file.txt", _config()) or ""
+    )
+    assert "redirect shell output" in (
+        rejection_message("exec > data/generated/file.txt", _config()) or ""
     )
 
 
@@ -196,6 +224,14 @@ def test_generated_path_matching_handles_absolute_paths() -> None:
     )
     assert "redirect shell output" in (
         rejection_message(f"printf x > {generated_file}", _config()) or ""
+    )
+
+
+def test_binary_block_matching_handles_absolute_paths() -> None:
+    binary = Path.cwd() / "target/debug/project-cli"
+    assert (
+        rejection_message(str(binary), _config())
+        == "Do not run project-cli directly. Use make test."
     )
 
 

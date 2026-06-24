@@ -268,6 +268,44 @@ def _extract_subshells(command: str) -> list[str]:
     return bodies
 
 
+def _extract_backticks(command: str) -> list[str]:
+    bodies: list[str] = []
+    in_single = False
+    in_double = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and index + 1 < len(command) and not in_single:
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if char != "`" or in_single:
+            index += 1
+            continue
+
+        body_start = index + 1
+        cursor = body_start
+        while cursor < len(command):
+            if command[cursor] == "\\" and cursor + 1 < len(command):
+                cursor += 2
+                continue
+            if command[cursor] == "`":
+                bodies.append(command[body_start:cursor])
+                index = cursor + 1
+                break
+            cursor += 1
+        else:
+            index += 1
+    return bodies
+
+
 def _is_env_assignment(token: str) -> bool:
     key, sep, _value = token.partition("=")
     return bool(sep and key and key.replace("_", "A").isalnum() and not key[0].isdigit())
@@ -451,6 +489,8 @@ def command_invocations(command: str) -> list[Invocation]:
         invocations.extend(command_invocations(body))
     for body in _extract_subshells(command):
         invocations.extend(command_invocations(body))
+    for body in _extract_backticks(command):
+        invocations.extend(command_invocations(body))
     for tokens in _shell_segments(command):
         env_payload = _env_split_payload(tokens)
         if env_payload:
@@ -458,6 +498,16 @@ def command_invocations(command: str) -> list[Invocation]:
 
         invocation = _unwrap_invocation(tokens)
         if invocation is None:
+            redirection_targets = _redirection_targets(tokens)
+            if redirection_targets:
+                invocations.append(
+                    Invocation(
+                        env={},
+                        executable="",
+                        args=(),
+                        redirection_targets=redirection_targets,
+                    )
+                )
             continue
         if invocation.basename == "eval" and invocation.args:
             invocations.extend(command_invocations(" ".join(invocation.args)))
@@ -586,6 +636,14 @@ def _branch_target(args: list[str], opts_with_arg: set[str], *, checkout: bool) 
             return None if checkout else (args[index + 1] if index + 1 < len(args) else None)
         if token in {"-d", "--detach"}:
             return args[index + 1] if index + 1 < len(args) else "HEAD"
+        if token.startswith("--create=") or token.startswith("--force-create="):
+            return token.split("=", 1)[1]
+        if checkout and token.startswith("--orphan="):
+            return token.split("=", 1)[1]
+        if token.startswith(("-b", "-B")) and token not in {"-b", "-B"}:
+            return token[2:]
+        if not checkout and token.startswith(("-c", "-C")) and token not in {"-c", "-C"}:
+            return token[2:]
         if token in opts_with_arg:
             if token in {"-b", "-B", "-c", "-C", "--create", "--force-create", "--orphan"}:
                 return args[index + 1] if index + 1 < len(args) else ""
@@ -704,7 +762,7 @@ def _path_matches(path: str, protected: str) -> bool:
 
 
 def _binary_matches(executable: str, basename: str, pattern: str) -> bool:
-    normalized = executable.removeprefix("./")
+    normalized = _clean_path(executable)
     return fnmatch.fnmatch(normalized, pattern) or fnmatch.fnmatch(basename, pattern)
 
 
