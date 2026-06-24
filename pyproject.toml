@@ -14,6 +14,7 @@ dev = [
 
 [project.scripts]
 agent-preflight = "agent_issues.cli.agent_preflight:main"
+agent-pretool-hook = "agent_issues.cli.agent_pretool_hook:main"
 agent-submit = "agent_issues.cli.agent_submit:main"
 branch-summary = "agent_issues.cli.branch_summary:main"
 coding-agent-here = "agent_issues.cli.coding_agent_here:main"
