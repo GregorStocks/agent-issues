@@ -155,6 +155,8 @@ def test_repo_install_adds_repo_guidance_and_global_skills(tmp_path: Path) -> No
     hook_text = hook_script.read_text()
     assert "CLAUDE_PROJECT_DIR" in hook_text
     assert "Local pre-tool hook failed" in hook_text
+    assert "agent-pretool-hook is not installed" in hook_text
+    assert 'uv tool dir --bin' in hook_text
     settings = json.loads((target_repo / ".claude/settings.local.json").read_text())
     assert settings["hooks"]["PreToolUse"] == [
         {

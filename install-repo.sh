@@ -137,7 +137,17 @@ if [ -x "$local_hook" ]; then
     fi
 fi
 
-agent-pretool-hook --config "$project_dir/.agent-issues/pretool-hook.json5" < "$tmp"'
+hook_bin="$(command -v agent-pretool-hook || true)"
+if [ -z "$hook_bin" ]; then
+    uv_bin_dir="$(uv tool dir --bin 2>/dev/null || true)"
+    hook_bin="$uv_bin_dir/agent-pretool-hook"
+fi
+if [ ! -x "$hook_bin" ]; then
+    echo "agent-pretool-hook is not installed or not executable; blocking command." >&2
+    exit 2
+fi
+
+"$hook_bin" --config "$project_dir/.agent-issues/pretool-hook.json5" < "$tmp"'
 ensure_claude_pretool_hook
 
 echo ""

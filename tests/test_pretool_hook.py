@@ -206,6 +206,15 @@ def test_inspects_shell_function_bodies() -> None:
     assert "agent-submit" in (
         rejection_message("function f { git push origin HEAD; }; f", _config()) or ""
     )
+    assert "agent-submit" in (
+        rejection_message("function f() { git push origin HEAD; }; f", _config()) or ""
+    )
+
+
+def test_inspects_case_arm_bodies() -> None:
+    assert "agent-submit" in (
+        rejection_message("case x in x) git push origin HEAD;; esac", _config()) or ""
+    )
 
 
 def test_git_switch_guess_does_not_hide_branch_target() -> None:
@@ -278,6 +287,9 @@ def test_blocks_generated_path_glob_mutations() -> None:
     assert "generated output" in (
         rejection_message("git checkout -- data/*", _config()) or ""
     )
+    assert "generated output" in (
+        rejection_message("rm -rf data/*/file.txt", _config()) or ""
+    )
 
 
 def test_generated_path_matching_handles_absolute_paths() -> None:
@@ -296,6 +308,24 @@ def test_generated_path_matching_collapses_dot_segments() -> None:
     )
     assert "redirect shell output" in (
         rejection_message("printf x > data/../data/generated/file.txt", _config()) or ""
+    )
+
+
+def test_generated_path_matching_tracks_cd_segments() -> None:
+    assert "generated output" in (
+        rejection_message("cd data && rm generated/file.txt", _config()) or ""
+    )
+    assert "redirect shell output" in (
+        rejection_message("cd data; printf x > generated/file.txt", _config()) or ""
+    )
+
+
+def test_inline_git_aliases_are_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message("git -c alias.p='push origin HEAD' p", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("git -c alias.p='!git push origin HEAD' p", _config()) or ""
     )
 
 

@@ -16,7 +16,7 @@ import re
 import shlex
 import subprocess
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +102,7 @@ class Invocation:
     executable: str
     args: tuple[str, ...]
     redirection_targets: tuple[str, ...] = ()
+    cwd: str = "."
 
     @property
     def basename(self) -> str:
@@ -333,7 +334,58 @@ def _function_body_tokens(tokens: list[str]) -> list[str]:
         return tokens[3:]
     if len(tokens) >= 5 and tokens[0] == "function" and tokens[2] == "{":
         return tokens[3:]
+    if (
+        len(tokens) >= 6
+        and tokens[0] == "function"
+        and tokens[2] == "()"
+        and tokens[3] == "{"
+    ):
+        return tokens[4:]
     return []
+
+
+def _case_body_tokens(tokens: list[str]) -> list[str]:
+    if not tokens or tokens[0] != "case" or ")" not in tokens:
+        return []
+    start = tokens.index(")") + 1
+    body: list[str] = []
+    for token in tokens[start:]:
+        if token in {";;", ";&", ";;&", "esac"}:
+            break
+        body.append(token)
+    return body
+
+
+def _git_inline_alias_payload(invocation: Invocation) -> str | None:
+    if invocation.basename != "git":
+        return None
+    aliases: dict[str, str] = {}
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        token = args[index]
+        config_value: str | None = None
+        if token == "-c" and index + 1 < len(args):
+            config_value = args[index + 1]
+            index += 2
+        elif token.startswith("-c") and token != "-c":
+            config_value = token[2:]
+            index += 1
+        else:
+            break
+        key, sep, value = config_value.partition("=") if config_value else ("", "", "")
+        if sep and key.startswith("alias."):
+            aliases[key.removeprefix("alias.")] = value
+    if index >= len(args):
+        return None
+    subcommand = args[index]
+    alias = aliases.get(subcommand)
+    if alias is None:
+        return None
+    rest = " ".join(shlex.quote(arg) for arg in args[index + 1 :])
+    if alias.startswith("!"):
+        return f"{alias[1:]} {rest}".strip()
+    return f"git {alias} {rest}".strip()
 
 
 _SHELL_CONTROL_KEYWORDS = {
@@ -530,6 +582,7 @@ def command_invocations(command: str) -> list[Invocation]:
 
     command, shell_heredocs = _strip_heredocs(command)
     invocations: list[Invocation] = []
+    cwd = "."
     for body in shell_heredocs:
         invocations.extend(command_invocations(body))
     for body in _extract_subshells(command):
@@ -540,6 +593,10 @@ def command_invocations(command: str) -> list[Invocation]:
         function_body = _function_body_tokens(tokens)
         if function_body:
             invocations.extend(command_invocations(" ".join(function_body)))
+
+        case_body = _case_body_tokens(tokens)
+        if case_body:
+            invocations.extend(command_invocations(" ".join(case_body)))
 
         env_payload = _env_split_payload(tokens)
         if env_payload:
@@ -555,9 +612,11 @@ def command_invocations(command: str) -> list[Invocation]:
                         executable="",
                         args=(),
                         redirection_targets=redirection_targets,
+                        cwd=cwd,
                     )
                 )
             continue
+        invocation = replace(invocation, cwd=cwd)
         if invocation.basename == "eval" and invocation.args:
             invocations.extend(command_invocations(" ".join(invocation.args)))
             continue
@@ -567,6 +626,8 @@ def command_invocations(command: str) -> list[Invocation]:
             invocations.extend(command_invocations(payload))
             continue
         invocations.append(invocation)
+        if invocation.basename == "cd" and invocation.args:
+            cwd = _clean_path(invocation.args[0], cwd=cwd)
     return invocations
 
 
@@ -794,7 +855,7 @@ def _make_targets(invocation: Invocation) -> list[str]:
     return targets
 
 
-def _clean_path(path: str) -> str:
+def _clean_path(path: str, *, cwd: str = ".") -> str:
     path = path.removeprefix(":(top)")
     path = path.removeprefix("./")
     path_obj = Path(path)
@@ -803,14 +864,27 @@ def _clean_path(path: str) -> str:
             path = str(path_obj.relative_to(Path.cwd()))
         except ValueError:
             path = str(path_obj)
+    elif cwd not in {"", "."}:
+        path = posixpath.join(cwd, path)
     path = posixpath.normpath(path)
     return path.rstrip("/")
 
 
-def _path_matches(path: str, protected: str, *, include_ancestors: bool = False) -> bool:
-    path = _clean_path(path)
+def _path_matches(
+    path: str,
+    protected: str,
+    *,
+    include_ancestors: bool = False,
+    cwd: str = ".",
+) -> bool:
+    path = _clean_path(path, cwd=cwd)
     protected = _clean_path(protected)
     if any(char in path for char in "*?["):
+        glob_prefix = re.split(r"[*?[]", path, maxsplit=1)[0].rstrip("/")
+        if glob_prefix and _path_matches(
+            glob_prefix, protected, include_ancestors=True
+        ):
+            return True
         return fnmatch.fnmatch(protected, path) or fnmatch.fnmatch(
             f"{protected}/__agent_issues_child__", path
         )
@@ -831,10 +905,12 @@ def _arg_targets_generated(
     paths: tuple[str, ...],
     *,
     include_ancestors: bool = False,
+    cwd: str = ".",
 ) -> bool:
     arg = arg.split("=", 1)[-1] if "=" in arg and not arg.startswith("-") else arg
     return any(
-        _path_matches(arg, path, include_ancestors=include_ancestors) for path in paths
+        _path_matches(arg, path, include_ancestors=include_ancestors, cwd=cwd)
+        for path in paths
     )
 
 
@@ -843,17 +919,32 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
         return False
     if invocation.basename in {"rm", "mv", "cp", "install", "touch", "truncate", "mkdir", "rmdir"}:
         return any(
-            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            _arg_targets_generated(
+                arg,
+                config.generated_paths,
+                include_ancestors=True,
+                cwd=invocation.cwd,
+            )
             for arg in invocation.args
         )
     if invocation.basename == "sed" and any(arg.startswith("-i") for arg in invocation.args):
         return any(
-            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            _arg_targets_generated(
+                arg,
+                config.generated_paths,
+                include_ancestors=True,
+                cwd=invocation.cwd,
+            )
             for arg in invocation.args
         )
     if invocation.basename == "perl" and any(arg.startswith("-pi") for arg in invocation.args):
         return any(
-            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            _arg_targets_generated(
+                arg,
+                config.generated_paths,
+                include_ancestors=True,
+                cwd=invocation.cwd,
+            )
             for arg in invocation.args
         )
     subcommand = _git_subcommand(invocation)
@@ -865,11 +956,21 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
         if not pathspecs:
             return True
         return any(
-            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            _arg_targets_generated(
+                arg,
+                config.generated_paths,
+                include_ancestors=True,
+                cwd=invocation.cwd,
+            )
             for arg in pathspecs
         )
     return name in {"checkout", "restore"} and any(
-        _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+        _arg_targets_generated(
+            arg,
+            config.generated_paths,
+            include_ancestors=True,
+            cwd=invocation.cwd,
+        )
         for arg in rest
     )
 
@@ -938,6 +1039,17 @@ def rejection_message(
                 "Only kill processes by specific PID after verifying the PID."
             )
 
+        alias_payload = _git_inline_alias_payload(invocation)
+        if alias_payload is not None:
+            alias_message = rejection_message(
+                alias_payload,
+                config,
+                timeout_ms=timeout_ms,
+                dirty_generated_output=dirty_generated_output,
+            )
+            if alias_message is not None:
+                return alias_message
+
         chain = _gh_chain(invocation)
         if chain and chain[0] == "issue":
             return f"Do not use GitHub Issues. This project tracks issues with {config.github_issue_guidance}."
@@ -967,7 +1079,7 @@ def rejection_message(
                 )
 
         if config.generated_paths and any(
-            _arg_targets_generated(target, config.generated_paths)
+            _arg_targets_generated(target, config.generated_paths, cwd=invocation.cwd)
             for target in invocation.redirection_targets
         ):
             return (
