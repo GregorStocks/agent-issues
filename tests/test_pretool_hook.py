@@ -167,6 +167,15 @@ def test_exec_a_name_operand_does_not_hide_command() -> None:
     )
 
 
+def test_sudo_operand_options_do_not_hide_command() -> None:
+    assert "agent-submit" in (
+        rejection_message("sudo -D /tmp git push origin HEAD", _config()) or ""
+    )
+    assert "pkill/killall" in (
+        rejection_message("sudo --chdir /tmp pkill python", _config()) or ""
+    )
+
+
 def test_env_attached_split_string_is_inspected() -> None:
     assert "agent-submit" in (
         rejection_message("env -S'git push origin HEAD'", _config()) or ""
@@ -223,6 +232,10 @@ def test_attached_branch_create_options_require_signoff() -> None:
     )
 
 
+def test_checkout_path_restore_does_not_require_branch_signoff() -> None:
+    assert rejection_message("git checkout HEAD -- file.txt", _config()) is None
+
+
 def test_blocks_shell_redirection_into_generated_paths() -> None:
     assert "redirect shell output" in (
         rejection_message("printf x > data/generated/file.txt", _config()) or ""
@@ -256,6 +269,10 @@ def test_blocks_generated_path_ancestor_mutations() -> None:
     assert "generated output" in (rejection_message("git checkout -- .", _config()) or "")
 
 
+def test_blocks_pathless_git_clean_as_tree_mutation() -> None:
+    assert "generated output" in (rejection_message("git clean -fdx", _config()) or "")
+
+
 def test_blocks_generated_path_glob_mutations() -> None:
     assert "generated output" in (rejection_message("rm -rf data/*", _config()) or "")
     assert "generated output" in (
@@ -270,6 +287,15 @@ def test_generated_path_matching_handles_absolute_paths() -> None:
     )
     assert "redirect shell output" in (
         rejection_message(f"printf x > {generated_file}", _config()) or ""
+    )
+
+
+def test_generated_path_matching_collapses_dot_segments() -> None:
+    assert "generated output" in (
+        rejection_message("rm data/../data/generated/file.txt", _config()) or ""
+    )
+    assert "redirect shell output" in (
+        rejection_message("printf x > data/../data/generated/file.txt", _config()) or ""
     )
 
 

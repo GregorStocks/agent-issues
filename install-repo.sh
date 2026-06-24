@@ -127,7 +127,14 @@ cd "$project_dir"
 
 local_hook="$project_dir/.claude/hooks/pretool-local.sh"
 if [ -x "$local_hook" ]; then
+    set +e
     "$local_hook" < "$tmp"
+    local_status="$?"
+    set -e
+    if [ "$local_status" -ne 0 ]; then
+        echo "Local pre-tool hook failed with status $local_status; blocking command." >&2
+        exit 2
+    fi
 fi
 
 agent-pretool-hook --config "$project_dir/.agent-issues/pretool-hook.json5" < "$tmp"'

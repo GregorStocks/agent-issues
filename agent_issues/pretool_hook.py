@@ -11,6 +11,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -418,7 +419,31 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
             continue
         if name == "sudo":
             index += 1
-            index = _skip_options(tokens, index, {"-u", "-g", "-h", "-p", "-C"})
+            index = _skip_options(
+                tokens,
+                index,
+                {
+                    "-C",
+                    "-D",
+                    "-R",
+                    "-T",
+                    "-g",
+                    "-h",
+                    "-p",
+                    "-r",
+                    "-t",
+                    "-u",
+                    "--chdir",
+                    "--chroot",
+                    "--command-timeout",
+                    "--group",
+                    "--host",
+                    "--prompt",
+                    "--role",
+                    "--type",
+                    "--user",
+                },
+            )
             continue
         if name == "nice":
             index += 1
@@ -653,6 +678,8 @@ _CHECKOUT_OPTS_WITH_ARG = {"-b", "-B", "--orphan", "--pathspec-from-file"}
 
 
 def _branch_target(args: list[str], opts_with_arg: set[str], *, checkout: bool) -> str | None:
+    if checkout and "--" in args and args.index("--") < len(args) - 1:
+        return None
     index = 0
     while index < len(args):
         token = args[index]
@@ -776,6 +803,7 @@ def _clean_path(path: str) -> str:
             path = str(path_obj.relative_to(Path.cwd()))
         except ValueError:
             path = str(path_obj)
+    path = posixpath.normpath(path)
     return path.rstrip("/")
 
 
@@ -832,7 +860,15 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if subcommand is None:
         return False
     name, rest = subcommand
-    return name in {"checkout", "restore", "clean"} and any(
+    if name == "clean":
+        pathspecs = [arg for arg in rest if not arg.startswith("-")]
+        if not pathspecs:
+            return True
+        return any(
+            _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
+            for arg in pathspecs
+        )
+    return name in {"checkout", "restore"} and any(
         _arg_targets_generated(arg, config.generated_paths, include_ancestors=True)
         for arg in rest
     )
