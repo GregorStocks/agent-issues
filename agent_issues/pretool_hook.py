@@ -195,8 +195,9 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
                 shell_bodies.append("".join(body))
             elif not quoted:
                 body_text = "".join(body)
-                shell_bodies.extend(_extract_subshells(body_text))
-                shell_bodies.extend(_extract_backticks(body_text))
+                expansion_text = body_text.translate({ord("'"): None, ord('"'): None})
+                shell_bodies.extend(_extract_subshells(expansion_text))
+                shell_bodies.extend(_extract_backticks(expansion_text))
     return "".join(output), shell_bodies
 
 
@@ -629,11 +630,14 @@ def _env_split_payload(tokens: list[str]) -> str | None:
         rest = tokens[index + 1 :]
         for arg_index, arg in enumerate(rest):
             if arg in {"-S", "--split-string"} and arg_index + 1 < len(rest):
-                return rest[arg_index + 1]
+                trailing = " ".join(shlex.quote(part) for part in rest[arg_index + 2 :])
+                return f"{rest[arg_index + 1]} {trailing}".strip()
             if arg.startswith("-S") and len(arg) > 2:
-                return arg[2:]
+                trailing = " ".join(shlex.quote(part) for part in rest[arg_index + 1 :])
+                return f"{arg[2:]} {trailing}".strip()
             if arg.startswith("--split-string="):
-                return arg.split("=", 1)[1]
+                trailing = " ".join(shlex.quote(part) for part in rest[arg_index + 1 :])
+                return f"{arg.split('=', 1)[1]} {trailing}".strip()
     return None
 
 
@@ -755,13 +759,24 @@ def _git_subcommand(invocation: Invocation) -> tuple[str, list[str]] | None:
         if token == "--":
             index += 1
             break
-        if token in {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}:
+        if token in {
+            "-C",
+            "-c",
+            "--config-env",
+            "--git-dir",
+            "--work-tree",
+            "--namespace",
+        }:
             index += 2
             continue
         if token.startswith("-c") and token != "-c":
             index += 1
             continue
-        if token.startswith("--git-dir=") or token.startswith("--work-tree="):
+        if (
+            token.startswith("--config-env=")
+            or token.startswith("--git-dir=")
+            or token.startswith("--work-tree=")
+        ):
             index += 1
             continue
         if token.startswith("-"):

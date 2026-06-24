@@ -192,6 +192,12 @@ def test_env_attached_split_string_is_inspected() -> None:
     )
 
 
+def test_env_split_string_keeps_trailing_command() -> None:
+    assert "agent-submit" in (
+        rejection_message("env -S 'VAR=x' git push origin HEAD", _config()) or ""
+    )
+
+
 def test_inspects_command_and_process_substitutions() -> None:
     assert "agent-submit" in (
         rejection_message("echo $(git push origin HEAD)", _config()) or ""
@@ -352,6 +358,13 @@ def test_inline_git_aliases_are_inspected() -> None:
     )
 
 
+def test_git_config_env_option_is_skipped_before_subcommand() -> None:
+    assert "agent-submit" in (
+        rejection_message("FOO=bar git --config-env foo.bar=FOO push origin HEAD", _config())
+        or ""
+    )
+
+
 def test_git_config_env_aliases_are_inspected() -> None:
     assert "agent-submit" in (
         rejection_message(
@@ -377,6 +390,11 @@ def test_heredoc_literal_body_is_not_parsed_as_command() -> None:
 
 def test_unquoted_heredoc_expansions_are_inspected() -> None:
     command = "cat <<EOF > /tmp/message\n" "$(git push origin HEAD)\n" "EOF\n"
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
+
+
+def test_unquoted_heredoc_expansions_ignore_body_quotes() -> None:
+    command = "cat <<EOF > /tmp/message\n" "'$(git push origin HEAD)'\n" "EOF\n"
     assert "agent-submit" in (rejection_message(command, _config()) or "")
 
 
