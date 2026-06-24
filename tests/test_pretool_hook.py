@@ -161,6 +161,21 @@ def test_skips_leading_redirections_before_executable() -> None:
     assert "pkill/killall" in (rejection_message("2>/tmp/e pkill python", _config()) or "")
 
 
+def test_exec_a_name_operand_does_not_hide_command() -> None:
+    assert "agent-submit" in (
+        rejection_message("exec -a spoof git push origin HEAD", _config()) or ""
+    )
+
+
+def test_env_attached_split_string_is_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message("env -S'git push origin HEAD'", _config()) or ""
+    )
+    assert "pkill/killall" in (
+        rejection_message("env --split-string='pkill python'", _config()) or ""
+    )
+
+
 def test_inspects_command_and_process_substitutions() -> None:
     assert "agent-submit" in (
         rejection_message("echo $(git push origin HEAD)", _config()) or ""
@@ -173,6 +188,15 @@ def test_inspects_legacy_backtick_substitutions() -> None:
         rejection_message("echo `git push origin HEAD`", _config()) or ""
     )
     assert "pkill/killall" in (rejection_message("echo `pkill python`", _config()) or "")
+
+
+def test_inspects_shell_function_bodies() -> None:
+    assert "agent-submit" in (
+        rejection_message("f(){ git push origin HEAD; }; f", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("function f { git push origin HEAD; }; f", _config()) or ""
+    )
 
 
 def test_git_switch_guess_does_not_hide_branch_target() -> None:
@@ -230,6 +254,13 @@ def test_blocks_generated_path_ancestor_mutations() -> None:
     assert "generated output" in (rejection_message("rm -rf data", _config()) or "")
     assert "generated output" in (rejection_message("git restore .", _config()) or "")
     assert "generated output" in (rejection_message("git checkout -- .", _config()) or "")
+
+
+def test_blocks_generated_path_glob_mutations() -> None:
+    assert "generated output" in (rejection_message("rm -rf data/*", _config()) or "")
+    assert "generated output" in (
+        rejection_message("git checkout -- data/*", _config()) or ""
+    )
 
 
 def test_generated_path_matching_handles_absolute_paths() -> None:

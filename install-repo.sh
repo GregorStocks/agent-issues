@@ -73,7 +73,7 @@ entry = {
     "hooks": [
         {
             "type": "command",
-            "command": ".claude/hooks/agent-issues-pretool-hook.sh",
+            "command": 'cd "${CLAUDE_PROJECT_DIR:-.}" && .claude/hooks/agent-issues-pretool-hook.sh',
         }
     ],
 }
@@ -122,12 +122,15 @@ tmp="$(mktemp)"
 trap '\''rm -f "$tmp"'\'' EXIT
 cat > "$tmp"
 
-local_hook=".claude/hooks/pretool-local.sh"
+project_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+cd "$project_dir"
+
+local_hook="$project_dir/.claude/hooks/pretool-local.sh"
 if [ -x "$local_hook" ]; then
     "$local_hook" < "$tmp"
 fi
 
-agent-pretool-hook --config .agent-issues/pretool-hook.json5 < "$tmp"'
+agent-pretool-hook --config "$project_dir/.agent-issues/pretool-hook.json5" < "$tmp"'
 ensure_claude_pretool_hook
 
 echo ""

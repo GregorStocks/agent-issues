@@ -159,7 +159,7 @@ def test_repo_install_adds_repo_guidance_and_global_skills(tmp_path: Path) -> No
             "hooks": [
                 {
                     "type": "command",
-                    "command": ".claude/hooks/agent-issues-pretool-hook.sh",
+                    "command": 'cd "${CLAUDE_PROJECT_DIR:-.}" && .claude/hooks/agent-issues-pretool-hook.sh',
                 }
             ],
         }
@@ -231,7 +231,7 @@ def test_repo_install_preserves_existing_repo_guidance(tmp_path: Path) -> None:
             "hooks": [
                 {
                     "type": "command",
-                    "command": ".claude/hooks/agent-issues-pretool-hook.sh",
+                    "command": 'cd "${CLAUDE_PROJECT_DIR:-.}" && .claude/hooks/agent-issues-pretool-hook.sh',
                 }
             ],
         }

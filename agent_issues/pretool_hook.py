@@ -327,6 +327,14 @@ def _skip_options(args: list[str], index: int, opts_with_arg: set[str]) -> int:
     return index
 
 
+def _function_body_tokens(tokens: list[str]) -> list[str]:
+    if len(tokens) >= 4 and tokens[1] == "()" and tokens[2] == "{":
+        return tokens[3:]
+    if len(tokens) >= 5 and tokens[0] == "function" and tokens[2] == "{":
+        return tokens[3:]
+    return []
+
+
 _SHELL_CONTROL_KEYWORDS = {
     "!",
     "(",
@@ -400,9 +408,13 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
         if name in _SHELL_CONTROL_KEYWORDS:
             index += 1
             continue
-        if name in {"time", "nohup", "command", "builtin", "exec"}:
+        if name in {"time", "nohup", "command", "builtin"}:
             index += 1
             index = _skip_options(tokens, index, set())
+            continue
+        if name == "exec":
+            index += 1
+            index = _skip_options(tokens, index, {"-a"})
             continue
         if name == "sudo":
             index += 1
@@ -432,7 +444,11 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
                 if tokens[index].startswith("-") and tokens[index] not in {"-", "--"}:
                     if tokens[index] in {"-u", "--unset", "-C", "--chdir"}:
                         index += 2
-                    elif tokens[index] in {"-S", "--split-string"}:
+                    elif (
+                        tokens[index] in {"-S", "--split-string"}
+                        or tokens[index].startswith("-S")
+                        or tokens[index].startswith("--split-string=")
+                    ):
                         return None
                     else:
                         index += 1
@@ -477,6 +493,8 @@ def _env_split_payload(tokens: list[str]) -> str | None:
         for arg_index, arg in enumerate(rest):
             if arg in {"-S", "--split-string"} and arg_index + 1 < len(rest):
                 return rest[arg_index + 1]
+            if arg.startswith("-S") and len(arg) > 2:
+                return arg[2:]
             if arg.startswith("--split-string="):
                 return arg.split("=", 1)[1]
     return None
@@ -494,6 +512,10 @@ def command_invocations(command: str) -> list[Invocation]:
     for body in _extract_backticks(command):
         invocations.extend(command_invocations(body))
     for tokens in _shell_segments(command):
+        function_body = _function_body_tokens(tokens)
+        if function_body:
+            invocations.extend(command_invocations(" ".join(function_body)))
+
         env_payload = _env_split_payload(tokens)
         if env_payload:
             invocations.extend(command_invocations(env_payload))
@@ -760,6 +782,10 @@ def _clean_path(path: str) -> str:
 def _path_matches(path: str, protected: str, *, include_ancestors: bool = False) -> bool:
     path = _clean_path(path)
     protected = _clean_path(protected)
+    if any(char in path for char in "*?["):
+        return fnmatch.fnmatch(protected, path) or fnmatch.fnmatch(
+            f"{protected}/__agent_issues_child__", path
+        )
     if path == protected or path.startswith(f"{protected}/"):
         return True
     if include_ancestors:
