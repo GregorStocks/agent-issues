@@ -37,6 +37,8 @@ def _run_install(
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     if codex_home is not None:
         env["CODEX_HOME"] = str(codex_home)
+    else:
+        env.pop("CODEX_HOME", None)
 
     subprocess.run(
         ["bash", str(repo_root / "install.sh")],
