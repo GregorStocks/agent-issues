@@ -25,10 +25,18 @@ exit 64
     uv.chmod(0o755)
 
 
-def _run_install(repo_root: Path, home: Path, bin_dir: Path) -> None:
+def _run_install(
+    repo_root: Path,
+    home: Path,
+    bin_dir: Path,
+    *,
+    codex_home: Path | None = None,
+) -> None:
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    if codex_home is not None:
+        env["CODEX_HOME"] = str(codex_home)
 
     subprocess.run(
         ["bash", str(repo_root / "install.sh")],
@@ -91,3 +99,23 @@ def test_install_preserves_existing_global_agent_content(tmp_path: Path) -> None
     assert codex_text == f"Existing Codex instructions.\n\n{codex_guidance}\n"
     assert claude_text.count(claude_include) == 1
     assert codex_text.count(codex_guidance) == 1
+
+
+def test_install_respects_custom_codex_home(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    home = tmp_path / "home"
+    codex_home = tmp_path / "codex"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_fake_uv(bin_dir)
+
+    _run_install(repo_root, home, bin_dir, codex_home=codex_home)
+
+    codex_guidance = (
+        "Use the `agent-issues` skill when working in repositories that use the "
+        "agent-issues local issue workflow."
+    )
+
+    assert (codex_home / "AGENTS.md").read_text() == f"{codex_guidance}\n"
+    assert (codex_home / "skills/agent-issues").is_symlink()
+    assert not (home / ".codex").exists()

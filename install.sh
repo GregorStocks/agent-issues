@@ -60,7 +60,8 @@ done
 ensure_global_agent_line "$HOME/.claude/CLAUDE.md" "@$HOME/.claude/skills/agent-issues/SKILL.md"
 
 # Codex global skills
-CODEX_SKILLS="$HOME/.codex/skills"
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+CODEX_SKILLS="$CODEX_HOME_DIR/skills"
 mkdir -p "$CODEX_SKILLS"
 
 for skill_dir in "$SKILLS_DIR"/*/; do
@@ -76,7 +77,7 @@ for skill_dir in "$SKILLS_DIR"/*/; do
     echo "Linked: $target -> $skill_dir"
 done
 
-ensure_global_agent_line "$HOME/.codex/AGENTS.md" 'Use the `agent-issues` skill when working in repositories that use the agent-issues local issue workflow.'
+ensure_global_agent_line "$CODEX_HOME_DIR/AGENTS.md" 'Use the `agent-issues` skill when working in repositories that use the agent-issues local issue workflow.'
 
 echo ""
 echo "Skills installed."
