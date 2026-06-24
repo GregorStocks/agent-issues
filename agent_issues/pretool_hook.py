@@ -344,38 +344,82 @@ def _function_body_tokens(tokens: list[str]) -> list[str]:
     return []
 
 
-def _case_body_tokens(tokens: list[str]) -> list[str]:
+def _case_body_token_groups(tokens: list[str]) -> list[list[str]]:
     if not tokens or tokens[0] != "case" or ")" not in tokens:
         return []
-    start = tokens.index(")") + 1
-    body: list[str] = []
-    for token in tokens[start:]:
-        if token in {";;", ";&", ";;&", "esac"}:
-            break
-        body.append(token)
-    return body
+    groups: list[list[str]] = []
+    index = 0
+    while ")" in tokens[index:]:
+        start = tokens.index(")", index) + 1
+        body: list[str] = []
+        index = start
+        while index < len(tokens):
+            token = tokens[index]
+            if token in {";;", ";&", ";;&", "esac"}:
+                index += 1
+                break
+            body.append(token)
+            index += 1
+        if body:
+            groups.append(body)
+    return groups
 
 
-def _git_inline_alias_payload(invocation: Invocation) -> str | None:
+def _git_cwd(invocation: Invocation) -> str:
     if invocation.basename != "git":
-        return None
+        return invocation.cwd
+    cwd = invocation.cwd
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "-C" and index + 1 < len(args):
+            cwd = _clean_path(args[index + 1], cwd=cwd)
+            index += 2
+            continue
+        break
+    return cwd
+
+
+def _git_option_aliases(invocation: Invocation) -> tuple[dict[str, str], int]:
     aliases: dict[str, str] = {}
     args = list(invocation.args)
     index = 0
     while index < len(args):
         token = args[index]
         config_value: str | None = None
+        if token == "-C" and index + 1 < len(args):
+            index += 2
+            continue
         if token == "-c" and index + 1 < len(args):
             config_value = args[index + 1]
             index += 2
         elif token.startswith("-c") and token != "-c":
             config_value = token[2:]
             index += 1
+        elif token == "--config-env" and index + 1 < len(args):
+            config_value = args[index + 1]
+            index += 2
+        elif token.startswith("--config-env="):
+            config_value = token.split("=", 1)[1]
+            index += 1
         else:
             break
+
         key, sep, value = config_value.partition("=") if config_value else ("", "", "")
-        if sep and key.startswith("alias."):
-            aliases[key.removeprefix("alias.")] = value
+        if not sep or not key.startswith("alias."):
+            continue
+        if token == "--config-env" or token.startswith("--config-env="):
+            value = invocation.env.get(value, "")
+        aliases[key.removeprefix("alias.")] = value
+    return aliases, index
+
+
+def _git_inline_alias_payload(invocation: Invocation) -> str | None:
+    if invocation.basename != "git":
+        return None
+    args = list(invocation.args)
+    aliases, index = _git_option_aliases(invocation)
     if index >= len(args):
         return None
     subcommand = args[index]
@@ -441,6 +485,7 @@ def _skip_redirection(tokens: list[str], index: int) -> int:
 
 def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
     env: dict[str, str] = {}
+    wrapper_cwd = "."
     redirection_targets = _redirection_targets(tokens)
     index = 0
 
@@ -459,6 +504,9 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
 
         name = os.path.basename(token)
         if name in _SHELL_CONTROL_KEYWORDS:
+            index += 1
+            continue
+        if name == "coproc":
             index += 1
             continue
         if name in {"time", "nohup", "command", "builtin"}:
@@ -519,8 +567,19 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
                     index += 1
                     continue
                 if tokens[index].startswith("-") and tokens[index] not in {"-", "--"}:
-                    if tokens[index] in {"-u", "--unset", "-C", "--chdir"}:
+                    if tokens[index] in {"-u", "--unset"}:
                         index += 2
+                    elif tokens[index] in {"-C", "--chdir"} and index + 1 < len(tokens):
+                        wrapper_cwd = _clean_path(tokens[index + 1], cwd=wrapper_cwd)
+                        index += 2
+                    elif tokens[index].startswith("--chdir="):
+                        wrapper_cwd = _clean_path(
+                            tokens[index].split("=", 1)[1], cwd=wrapper_cwd
+                        )
+                        index += 1
+                    elif tokens[index].startswith("-C") and len(tokens[index]) > 2:
+                        wrapper_cwd = _clean_path(tokens[index][2:], cwd=wrapper_cwd)
+                        index += 1
                     elif (
                         tokens[index] in {"-S", "--split-string"}
                         or tokens[index].startswith("-S")
@@ -541,6 +600,7 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
         executable=tokens[index],
         args=tuple(tokens[index + 1 :]),
         redirection_targets=redirection_targets,
+        cwd=wrapper_cwd,
     )
 
 
@@ -594,8 +654,7 @@ def command_invocations(command: str) -> list[Invocation]:
         if function_body:
             invocations.extend(command_invocations(" ".join(function_body)))
 
-        case_body = _case_body_tokens(tokens)
-        if case_body:
+        for case_body in _case_body_token_groups(tokens):
             invocations.extend(command_invocations(" ".join(case_body)))
 
         env_payload = _env_split_payload(tokens)
@@ -616,7 +675,8 @@ def command_invocations(command: str) -> list[Invocation]:
                     )
                 )
             continue
-        invocation = replace(invocation, cwd=cwd)
+        invocation_cwd = _clean_path(invocation.cwd, cwd=cwd)
+        invocation = replace(invocation, cwd=invocation_cwd)
         if invocation.basename == "eval" and invocation.args:
             invocations.extend(command_invocations(" ".join(invocation.args)))
             continue
@@ -951,6 +1011,7 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if subcommand is None:
         return False
     name, rest = subcommand
+    git_cwd = _git_cwd(invocation)
     if name == "clean":
         pathspecs = [arg for arg in rest if not arg.startswith("-")]
         if not pathspecs:
@@ -960,7 +1021,7 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
                 arg,
                 config.generated_paths,
                 include_ancestors=True,
-                cwd=invocation.cwd,
+                cwd=git_cwd,
             )
             for arg in pathspecs
         )
@@ -969,7 +1030,7 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
             arg,
             config.generated_paths,
             include_ancestors=True,
-            cwd=invocation.cwd,
+            cwd=git_cwd,
         )
         for arg in rest
     )

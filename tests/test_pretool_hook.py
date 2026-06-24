@@ -154,6 +154,13 @@ def test_inspects_commands_after_shell_control_keywords() -> None:
     )
 
 
+def test_coproc_is_unwrapped_before_policy_checks() -> None:
+    assert "agent-submit" in (
+        rejection_message("coproc git push origin HEAD", _config()) or ""
+    )
+    assert "pkill/killall" in (rejection_message("coproc pkill python", _config()) or "")
+
+
 def test_skips_leading_redirections_before_executable() -> None:
     assert "agent-submit" in (
         rejection_message(">/tmp/out git push origin HEAD", _config()) or ""
@@ -214,6 +221,10 @@ def test_inspects_shell_function_bodies() -> None:
 def test_inspects_case_arm_bodies() -> None:
     assert "agent-submit" in (
         rejection_message("case x in x) git push origin HEAD;; esac", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("case y in x) :;; y) git push origin HEAD;; esac", _config())
+        or ""
     )
 
 
@@ -320,12 +331,34 @@ def test_generated_path_matching_tracks_cd_segments() -> None:
     )
 
 
+def test_generated_path_matching_tracks_env_chdir() -> None:
+    assert "generated output" in (
+        rejection_message("env -C data rm generated/file.txt", _config()) or ""
+    )
+
+
+def test_generated_path_matching_tracks_git_dash_c() -> None:
+    assert "generated output" in (
+        rejection_message("git -C data restore generated/file.txt", _config()) or ""
+    )
+
+
 def test_inline_git_aliases_are_inspected() -> None:
     assert "agent-submit" in (
         rejection_message("git -c alias.p='push origin HEAD' p", _config()) or ""
     )
     assert "agent-submit" in (
         rejection_message("git -c alias.p='!git push origin HEAD' p", _config()) or ""
+    )
+
+
+def test_git_config_env_aliases_are_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message(
+            "GITALIAS='push origin HEAD' git --config-env=alias.p=GITALIAS p",
+            _config(),
+        )
+        or ""
     )
 
 
