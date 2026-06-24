@@ -13,7 +13,16 @@ Pick and solve exactly **one** issue, then create a PR. Issue claims live in the
 - `.claude/skills/solve-issue-local/SKILL.md` (Claude Code)
 - `.agents/skills/solve-issue-local/SKILL.md` (Codex)
 
-If either exists, read it and follow its instructions alongside this workflow. The local skill defines repo-specific build commands, test commands, lint targets, and any special considerations.
+If either exists, read it and follow its instructions alongside this workflow.
+The local skill should stay narrow: repo-specific build, test, and lint
+commands; generated-artifact rules; dependency policy; domain constraints; and
+other project-specific review steps.
+
+Do not expect `solve-issue-local` to repeat shared issue or PR mechanics. This
+skill owns preflight checks, issue claiming, already-fixed cleanup, planning
+shape, issue deletion, progress pushes, and final `submit-pr` handoff. The
+`submit-pr` skill owns PR creation or update, CI watching, review feedback
+loops, and timeout handling through `agent-submit`.
 
 ## Workflow
 

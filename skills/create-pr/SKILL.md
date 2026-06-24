@@ -13,7 +13,15 @@ Create a pull request for the current branch's changes.
 - `.claude/skills/create-pr-local/SKILL.md` (Claude Code)
 - `.agents/skills/create-pr-local/SKILL.md` (Codex)
 
-If either exists, read it and follow its instructions alongside this workflow. The local skill defines repo-specific validation commands, pre-PR steps, and any special considerations.
+If either exists, read it and follow its instructions alongside this workflow.
+The local skill should stay narrow: repo-specific validation commands,
+generated-artifact rules, dependency policy, pre-PR checks, and other project
+constraints.
+
+Do not expect `create-pr-local` to repeat shared PR mechanics. This skill owns
+branch summarization, default-branch merges, validation timing, `submit-pr`
+handoff, PR creation or update, CI watching, review feedback loops, and timeout
+handling through `submit-pr` and `agent-submit`.
 
 ## Workflow
 

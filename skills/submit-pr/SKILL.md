@@ -81,3 +81,7 @@ For each canonical key, locate the issue file:
 - **Root-cause fixes only.** When CI fails, diagnose the actual failure — don't paper over it with a broader timeout, a skipped test, or a `try/except` that swallows the error.
 - **One logical change per PR** — if a CI failure or review comment reveals work that belongs in a separate PR, note it for the user rather than bundling it in.
 - **Never skip hooks** (`--no-verify`) or bypass signing to make `agent-submit` pass. If a hook fails, fix the underlying issue.
+- Repo-local PR skills should not restate this workflow. Keep `create-pr-local`
+  and `solve-issue-local` focused on local validation commands, generated files,
+  dependency policy, and repo-specific constraints; this skill owns PR metadata,
+  publish/update, CI watching, review feedback, and timeout handling.
