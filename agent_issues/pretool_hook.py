@@ -233,10 +233,14 @@ _HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([^\s'\";|&<>]+)\1")
 
 
 def _heredoc_specs(command_line: str) -> list[tuple[str, bool]]:
-    return [
-        (match.group(2), bool(match.group(1)))
-        for match in _HEREDOC_RE.finditer(command_line)
-    ]
+    specs: list[tuple[str, bool]] = []
+    for match in _HEREDOC_RE.finditer(command_line):
+        delimiter = match.group(2)
+        backslash_quoted = "\\" in delimiter
+        specs.append(
+            (delimiter.replace("\\", ""), bool(match.group(1)) or backslash_quoted)
+        )
+    return specs
 
 
 def _strip_heredocs(command: str) -> tuple[str, list[str]]:
@@ -681,6 +685,12 @@ def _git_uses_config_include(invocation: Invocation) -> bool:
     return False
 
 
+def _git_uses_config_parameters(invocation: Invocation) -> bool:
+    return invocation.basename == "git" and bool(
+        invocation.env.get("GIT_CONFIG_PARAMETERS")
+    )
+
+
 def _git_writes_alias(invocation: Invocation) -> bool:
     subcommand = _git_subcommand(invocation)
     if subcommand is None:
@@ -1097,6 +1107,15 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
     previous_cwd = initial_cwd
     for body in shell_heredocs:
         invocations.extend(command_invocations(body, initial_cwd=cwd))
+    if shell_heredocs:
+        invocations.append(
+            Invocation(
+                env={},
+                executable="__agent_issues_shell_heredoc__",
+                args=(),
+                cwd=cwd,
+            )
+        )
     invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
     pending_or_cwd: tuple[str, str] | None = None
     shell_vars: dict[str, str] = {}
@@ -1113,6 +1132,14 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         function_body = _function_body_tokens(tokens)
         if function_body:
             invocations.extend(command_invocations(" ".join(function_body), initial_cwd=cwd))
+            invocations.append(
+                Invocation(
+                    env={},
+                    executable="__agent_issues_function_definition__",
+                    args=(),
+                    cwd=cwd,
+                )
+            )
 
         for case_body in _case_body_token_groups(tokens):
             invocations.extend(command_invocations(" ".join(case_body), initial_cwd=cwd))
@@ -1152,6 +1179,20 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         )
         if invocation.basename == "export":
             for arg in invocation.args:
+                if _is_env_assignment(arg):
+                    key, value = arg.split("=", 1)
+                    shell_vars[key] = value
+                    exported_env[key] = value
+                elif arg in shell_vars:
+                    exported_env[arg] = shell_vars[arg]
+            invocations.append(invocation)
+            continue
+        if invocation.basename in {"declare", "typeset"} and any(
+            arg.startswith("-") and "x" in arg for arg in invocation.args
+        ):
+            for arg in invocation.args:
+                if arg.startswith("-"):
+                    continue
                 if _is_env_assignment(arg):
                     key, value = arg.split("=", 1)
                     shell_vars[key] = value
@@ -1958,6 +1999,18 @@ def rejection_message(
                 "operands can hide what the command will mutate or publish."
             )
 
+        if invocation.basename == "__agent_issues_shell_heredoc__":
+            return (
+                "Do not execute shell heredoc bodies in hook-checked commands; "
+                "their execution context is not statically reliable."
+            )
+
+        if invocation.basename == "__agent_issues_function_definition__":
+            return (
+                "Do not define shell functions in hook-checked commands; function "
+                "bodies execute later in a call-site context the hook cannot verify."
+            )
+
         if _policy_relevant_invocation_has_expansion(invocation):
             return (
                 "Do not use unresolved shell expansions in hook-checked command "
@@ -1981,6 +2034,12 @@ def rejection_message(
             return (
                 "Do not load additional Git config inside hook-checked commands; "
                 "included config can define aliases that hide policy-relevant git subcommands."
+            )
+
+        if _git_uses_config_parameters(invocation):
+            return (
+                "Do not pass GIT_CONFIG_PARAMETERS into hook-checked git commands; "
+                "it can define aliases that hide policy-relevant git subcommands."
             )
 
         alias_payload = _git_inline_alias_payload(invocation)

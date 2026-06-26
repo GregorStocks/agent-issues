@@ -373,6 +373,12 @@ def test_inspects_shell_function_bodies() -> None:
     )
 
 
+def test_rejects_shell_function_definitions() -> None:
+    assert "shell functions" in (
+        rejection_message("f(){ echo ok; }; f", _config()) or ""
+    )
+
+
 def test_inspects_case_arm_bodies() -> None:
     assert "agent-submit" in (
         rejection_message("case x in x) git push origin HEAD;; esac", _config()) or ""
@@ -694,6 +700,27 @@ def test_exported_git_counted_env_aliases_are_inspected() -> None:
     )
 
 
+def test_git_config_parameters_are_rejected() -> None:
+    assert "GIT_CONFIG_PARAMETERS" in (
+        rejection_message(
+            "GIT_CONFIG_PARAMETERS=\"'alias.p=push origin HEAD'\" git p",
+            _config(),
+        )
+        or ""
+    )
+
+
+def test_declare_exported_git_counted_env_aliases_are_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message(
+            "declare -x GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p "
+            "GIT_CONFIG_VALUE_0='push origin HEAD'; git p",
+            _config(),
+        )
+        or ""
+    )
+
+
 def test_bare_exported_git_counted_env_aliases_are_inspected() -> None:
     assert "agent-submit" in (
         rejection_message(
@@ -876,6 +903,11 @@ def test_heredoc_delimiter_uses_full_token() -> None:
     assert "agent-submit" in (rejection_message(command, _config()) or "")
 
 
+def test_backslash_quoted_heredoc_delimiter_uses_unescaped_token() -> None:
+    command = "cat <<\\EOF >/tmp/message\n" "hello\n" "EOF\n" "git push origin HEAD\n"
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
+
+
 def test_same_line_heredocs_use_each_owner_command() -> None:
     command = (
         "cat <<'EOF1'; bash <<'EOF2'\n"
@@ -915,6 +947,13 @@ def test_shell_heredoc_body_is_parsed_as_command() -> None:
 def test_shell_heredoc_after_list_operator_is_parsed_as_command() -> None:
     command = "true && bash <<'EOF'\n" "git push origin HEAD\n" "EOF\n"
     assert "agent-submit" in (rejection_message(command, _config()) or "")
+
+
+def test_rejects_shell_heredoc_execution_context() -> None:
+    assert "shell heredoc" in (
+        rejection_message("cd data && bash <<EOF\n" "echo ok\n" "EOF\n", _config())
+        or ""
+    )
 
 
 def test_extracts_timeout_from_transcript(tmp_path: Path) -> None:
