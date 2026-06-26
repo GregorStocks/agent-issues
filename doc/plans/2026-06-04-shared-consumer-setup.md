@@ -59,9 +59,12 @@ specific to `infallible-record`.
 
 5. **Extract a shared pre-tool hook runner.** Add an `agent-pretool-hook` CLI
    that reads hook input from stdin and evaluates shared rules from a typed
-   config file. Move the robust shell parser and generic Git/GitHub guards into
-   `agent-issues`; keep only declarative repo config and exceptional local hook
-   code in consumer repos.
+   config file. The hook is a convention guardrail for good-faith agents, not a
+   security boundary or a complete shell sandbox: it should catch common
+   accidental use of unidiomatic commands and point agents at the repo's
+   preferred workflow. Keep the implementation small, readable, and oriented
+   around ordinary command shapes; leave only declarative repo config and small
+   exceptional local hook code in consumer repos.
 
 6. **Add a consumer bootstrap command.** Add `agent-issues init` or equivalent
    to create minimal repo scaffolding non-destructively: an empty

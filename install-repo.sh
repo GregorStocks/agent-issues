@@ -103,9 +103,11 @@ PY
 ensure_line "$AGENTS_FILE" "$AGENT_ISSUES_LINE"
 ensure_line "$CLAUDE_FILE" "@AGENTS.md"
 ensure_file "$HOOK_CONFIG" "644" '{
-  // Repo-specific settings for the shared agent-issues PreToolUse hook.
-  // Keep truly local checks in .claude/hooks/pretool-local.sh when config is
-  // not expressive enough.
+  // Repo-specific settings for the shared agent-issues PreToolUse hook. This
+  // hook is a convention guardrail for good-faith agents, not a security
+  // sandbox. Keep normal project guidance declarative here; use
+  // .claude/hooks/pretool-local.sh only for small repo-specific checks that do
+  // not fit this config.
   branch_switch_signoff_env: "AGENT_BRANCH_SWITCH_SIGNOFF",
   generated_paths: [],
   generated_command: "the generator target",
