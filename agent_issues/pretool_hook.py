@@ -251,20 +251,28 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
             index += 1
             continue
 
-        heredoc_index = min(
-            tokens.index("<<") if "<<" in tokens else len(tokens),
-            tokens.index("<<-") if "<<-" in tokens else len(tokens),
-        )
-        segment_start = 0
-        for token_index, token in enumerate(tokens[:heredoc_index]):
-            if token in {"&&", "||", ";", "|", "&"}:
-                segment_start = token_index + 1
-        invocation = _unwrap_invocation(tokens[segment_start:heredoc_index])
-        is_shell = invocation is not None and invocation.basename in {"sh", "bash", "zsh", "dash"}
+        operator_indexes = [
+            token_index for token_index, token in enumerate(tokens) if token in {"<<", "<<-"}
+        ]
+        spec_infos: list[tuple[str, bool, bool]] = []
+        for spec_index, (delimiter, quoted) in enumerate(specs):
+            heredoc_index = operator_indexes[min(spec_index, len(operator_indexes) - 1)]
+            segment_start = 0
+            for token_index, token in enumerate(tokens[:heredoc_index]):
+                if token in {"&&", "||", ";", "|", "&"}:
+                    segment_start = token_index + 1
+            invocation = _unwrap_invocation(tokens[segment_start:heredoc_index])
+            is_shell = invocation is not None and invocation.basename in {
+                "sh",
+                "bash",
+                "zsh",
+                "dash",
+            }
+            spec_infos.append((delimiter, quoted, is_shell))
         output.append(line)
         index += 1
 
-        for delimiter, quoted in specs:
+        for delimiter, quoted, is_shell in spec_infos:
             body: list[str] = []
             while index < len(lines):
                 body_line = lines[index]
@@ -1036,6 +1044,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         invocations.extend(command_invocations(body, initial_cwd=cwd))
     invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
     pending_or_cwd: tuple[str, str] | None = None
+    shell_vars: dict[str, str] = {}
     exported_env: dict[str, str] = {}
     for tokens, next_separator in _shell_segments_with_separators(command):
         segment_command = _segment_command(tokens)
@@ -1057,6 +1066,12 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             invocations.extend(
                 command_invocations(payload, initial_cwd=_clean_path(payload_cwd, cwd=cwd))
             )
+
+        if tokens and all(_is_env_assignment(token) for token in tokens):
+            for token in tokens:
+                key, value = token.split("=", 1)
+                shell_vars[key] = value
+            continue
 
         invocation = _unwrap_invocation(tokens)
         if invocation is None:
@@ -1082,7 +1097,10 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             for arg in invocation.args:
                 if _is_env_assignment(arg):
                     key, value = arg.split("=", 1)
+                    shell_vars[key] = value
                     exported_env[key] = value
+                elif arg in shell_vars:
+                    exported_env[arg] = shell_vars[arg]
             invocations.append(invocation)
             continue
         if invocation.basename == "eval" and invocation.args:
@@ -1487,6 +1505,15 @@ def _clean_path(path: str, *, cwd: str = ".") -> str:
     elif cwd not in {"", "."}:
         path = posixpath.join(cwd, path)
     path = posixpath.normpath(path)
+    repo_root = Path.cwd().resolve()
+    path_obj = Path(path)
+    absolute_path = (
+        path_obj.resolve() if path_obj.is_absolute() else (repo_root / path).resolve()
+    )
+    try:
+        path = str(absolute_path.relative_to(repo_root))
+    except ValueError:
+        path = str(absolute_path)
     return path.rstrip("/")
 
 

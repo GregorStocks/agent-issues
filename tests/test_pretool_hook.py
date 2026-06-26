@@ -529,6 +529,11 @@ def test_generated_path_matching_tracks_cd_with_options() -> None:
     )
 
 
+def test_generated_path_matching_rebases_paths_after_cd_leaves_repo() -> None:
+    command = f"cd .. && rm {Path.cwd().name}/data/generated/file.txt"
+    assert "generated output" in (rejection_message(command, _config()) or "")
+
+
 def test_substitution_uses_cwd_after_cd() -> None:
     assert "generated output" in (
         rejection_message("cd data && echo $(rm generated/file.txt)", _config()) or ""
@@ -665,6 +670,20 @@ def test_exported_git_counted_env_aliases_are_inspected() -> None:
         rejection_message(
             "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p "
             "GIT_CONFIG_VALUE_0='push origin HEAD'; git p",
+            _config(),
+        )
+        or ""
+    )
+
+
+def test_bare_exported_git_counted_env_aliases_are_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message(
+            "GIT_CONFIG_COUNT=1; "
+            "GIT_CONFIG_KEY_0=alias.p; "
+            "GIT_CONFIG_VALUE_0='push origin HEAD'; "
+            "export GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0; "
+            "git p",
             _config(),
         )
         or ""
@@ -835,6 +854,17 @@ def test_heredoc_delimiter_uses_full_token() -> None:
         "hello\n"
         "EOF.txt\n"
         "git push origin HEAD\n"
+    )
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
+
+
+def test_same_line_heredocs_use_each_owner_command() -> None:
+    command = (
+        "cat <<'EOF1'; bash <<'EOF2'\n"
+        "literal\n"
+        "EOF1\n"
+        "git push origin HEAD\n"
+        "EOF2\n"
     )
     assert "agent-submit" in (rejection_message(command, _config()) or "")
 
