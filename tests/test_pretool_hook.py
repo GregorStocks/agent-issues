@@ -167,6 +167,11 @@ def test_blocks_unresolved_shell_c_payload() -> None:
     )
 
 
+def test_blocks_nested_shell_alias_expansion() -> None:
+    command = "bash -O expand_aliases -c 'alias p=\"git push origin HEAD\"\np'"
+    assert "alias expansion" in (rejection_message(command, _config()) or "")
+
+
 def test_blocks_stdin_fed_shells() -> None:
     assert "pipe unresolved stdin into a shell" in (
         rejection_message("printf 'git push origin HEAD\\n' | sh", _config()) or ""
@@ -218,6 +223,12 @@ def test_blocks_previous_branch_shorthand() -> None:
     )
     assert "PROJECT_BRANCH_SWITCH_SIGNOFF=-" in (
         rejection_message("git checkout -", _config()) or ""
+    )
+
+
+def test_blocks_direct_git_switch_helper() -> None:
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
+        rejection_message("/usr/lib/git-core/git-switch feature", _config()) or ""
     )
 
 
@@ -623,6 +634,13 @@ def test_blocks_git_top_level_pathspec_generated_paths() -> None:
     assert "generated output" in (
         rejection_message(
             "git restore ':(top,literal)data/generated/file.txt'",
+            _config(),
+        )
+        or ""
+    )
+    assert "generated output" in (
+        rejection_message(
+            "/usr/lib/git-core/git-restore data/generated/file.txt",
             _config(),
         )
         or ""

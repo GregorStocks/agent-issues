@@ -793,6 +793,18 @@ def _shell_c_payload(invocation: Invocation) -> str | None:
     return None
 
 
+def _shell_enables_alias_expansion(invocation: Invocation) -> bool:
+    if invocation.basename not in {"bash", "sh", "zsh", "dash"}:
+        return False
+    args = list(invocation.args)
+    for index, arg in enumerate(args):
+        if arg == "-O" and index + 1 < len(args) and args[index + 1] == "expand_aliases":
+            return True
+        if arg.startswith("-O") and arg[2:] == "expand_aliases":
+            return True
+    return False
+
+
 def _shell_here_string_payload(invocation: Invocation) -> str | None:
     if invocation.basename not in {"sh", "bash", "zsh", "dash"}:
         return None
@@ -959,7 +971,9 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
 
         payload = _shell_c_payload(invocation)
         if payload is not None:
-            if _has_unresolved_shell_expansion(payload):
+            if _shell_enables_alias_expansion(invocation) or _has_unresolved_shell_expansion(
+                payload
+            ):
                 invocations.append(invocation)
             else:
                 invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
@@ -1053,6 +1067,8 @@ def tool_timeout_ms(data: dict[str, Any]) -> int | None:
 
 
 def _git_subcommand(invocation: Invocation) -> tuple[str, list[str]] | None:
+    if invocation.basename.startswith("git-") and invocation.basename != "git":
+        return invocation.basename.removeprefix("git-"), list(invocation.args)
     if invocation.basename != "git":
         return None
     args = list(invocation.args)
@@ -1603,6 +1619,11 @@ def rejection_message(
             )
 
         shell_payload = _shell_c_payload(invocation)
+        if shell_payload is not None and _shell_enables_alias_expansion(invocation):
+            return (
+                "Do not enable shell alias expansion in nested shell payloads; "
+                "aliases can hide commands from static policy checks."
+            )
         if shell_payload is not None and _has_unresolved_shell_expansion(shell_payload):
             return (
                 "Do not use shell -c with unresolved shell expansions; the hook "
