@@ -103,6 +103,12 @@ def test_blocks_kill_by_name_under_wrappers() -> None:
     assert "pkill/killall" in message
 
 
+def test_nice_adjustment_does_not_hide_command() -> None:
+    assert "agent-submit" in (
+        rejection_message("nice --adjustment 10 git push origin HEAD", _config()) or ""
+    )
+
+
 def test_blocks_branch_switch_without_matching_signoff() -> None:
     message = rejection_message("git switch feature", _config())
     assert message is not None
@@ -221,6 +227,20 @@ def test_inspects_xargs_payloads() -> None:
     )
 
 
+def test_inspects_find_exec_payloads() -> None:
+    assert "agent-submit" in (
+        rejection_message("find . -maxdepth 0 -exec git push origin HEAD ';'", _config())
+        or ""
+    )
+    assert "generated output" in (
+        rejection_message(
+            "find . -maxdepth 0 -exec rm data/generated/file.txt ';'",
+            _config(),
+        )
+        or ""
+    )
+
+
 def test_blocks_policy_relevant_xargs_with_stdin_operands() -> None:
     assert "xargs" in (
         rejection_message("printf 'data/generated/file.txt\\n' | xargs rm", _config())
@@ -249,6 +269,9 @@ def test_blocks_unresolved_policy_relevant_expansions() -> None:
     )
     assert "unresolved shell expansions" in (
         rejection_message("d=data; cd \"$d\" && rm generated/file.txt", _config()) or ""
+    )
+    assert "unresolved shell expansions" in (
+        rejection_message("git p*sh origin HEAD", _config()) or ""
     )
     assert rejection_message("echo \"$HOME\"", _config()) is None
 

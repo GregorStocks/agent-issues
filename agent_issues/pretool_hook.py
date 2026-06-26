@@ -863,7 +863,7 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
             continue
         if name == "nice":
             index += 1
-            index = _skip_options(tokens, index, {"-n"})
+            index = _skip_options(tokens, index, {"-n", "--adjustment"})
             continue
         if name == "timeout":
             index += 1
@@ -1085,6 +1085,26 @@ def _xargs_payload(invocation: Invocation) -> str | None:
     return " ".join(shlex.quote(arg) for arg in args[index:])
 
 
+def _find_exec_payloads(invocation: Invocation) -> list[str]:
+    if invocation.basename != "find":
+        return []
+    payloads: list[str] = []
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        if args[index] not in {"-exec", "-execdir"}:
+            index += 1
+            continue
+        index += 1
+        payload: list[str] = []
+        while index < len(args) and args[index] not in {";", "+"}:
+            payload.append(args[index])
+            index += 1
+        if payload:
+            payloads.append(" ".join(shlex.quote(arg) for arg in payload))
+    return payloads
+
+
 def _cd_target(args: tuple[str, ...]) -> str | None:
     index = 0
     while index < len(args):
@@ -1262,6 +1282,11 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
                         cwd=invocation.cwd,
                     )
                 )
+            continue
+        find_payloads = _find_exec_payloads(invocation)
+        if find_payloads:
+            for payload in find_payloads:
+                invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
         invocations.append(invocation)
         if (
@@ -1550,8 +1575,17 @@ def _has_unresolved_shell_expansion(value: str) -> bool:
     )
 
 
+def _has_unresolved_pathname_expansion(value: str) -> bool:
+    return any(char in value for char in "*?[")
+
+
 def _policy_relevant_invocation_has_expansion(invocation: Invocation) -> bool:
-    if _has_unresolved_shell_expansion(invocation.executable):
+    if _has_unresolved_shell_expansion(
+        invocation.executable
+    ) or _has_unresolved_pathname_expansion(invocation.executable):
+        return True
+    subcommand = _git_subcommand(invocation)
+    if subcommand is not None and _has_unresolved_pathname_expansion(subcommand[0]):
         return True
     if invocation.basename not in _POLICY_RELEVANT_COMMANDS:
         return False
