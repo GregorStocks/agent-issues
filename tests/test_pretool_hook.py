@@ -365,6 +365,13 @@ def test_blocks_generated_path_ancestor_mutations() -> None:
     assert "generated output" in (rejection_message("git checkout -- .", _config()) or "")
 
 
+def test_failed_cd_branch_does_not_change_tracked_cwd() -> None:
+    assert "generated output" in (
+        rejection_message("cd /definitely-missing || rm data/generated/file.txt", _config())
+        or ""
+    )
+
+
 def test_blocks_pathless_forced_checkout_as_tree_mutation() -> None:
     assert "generated output" in (rejection_message("git checkout -f", _config()) or "")
     assert "generated output" in (
@@ -431,6 +438,15 @@ def test_generated_path_matching_tracks_env_chdir() -> None:
     )
 
 
+def test_generated_path_matching_tracks_sudo_chdir() -> None:
+    assert "generated output" in (
+        rejection_message("sudo -D data rm generated/file.txt", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("sudo --chdir=data rm generated/file.txt", _config()) or ""
+    )
+
+
 def test_generated_path_matching_tracks_env_chdir_with_split_string() -> None:
     assert "generated output" in (
         rejection_message("env -C data -S 'rm generated/file.txt'", _config()) or ""
@@ -460,6 +476,12 @@ def test_inline_git_aliases_are_inspected() -> None:
     )
     assert "agent-submit" in (
         rejection_message("git -p -c alias.p='push origin HEAD' p", _config()) or ""
+    )
+
+
+def test_blocks_git_config_alias_writes() -> None:
+    assert "Git aliases" in (
+        rejection_message("git config alias.p 'push origin HEAD'; git p", _config()) or ""
     )
 
 
@@ -528,6 +550,15 @@ def test_blocks_git_top_level_pathspec_generated_paths() -> None:
     )
 
 
+def test_blocks_git_pathspec_from_file_generated_restores() -> None:
+    assert "generated output" in (
+        rejection_message("git restore --pathspec-from-file=/tmp/paths", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("git checkout --pathspec-from-file /tmp/paths", _config()) or ""
+    )
+
+
 def test_blocks_tee_writes_to_generated_paths() -> None:
     assert "generated output" in (
         rejection_message("printf x | tee data/generated/file.txt", _config()) or ""
@@ -543,6 +574,23 @@ def test_blocks_link_writes_to_generated_paths() -> None:
     )
     assert "generated output" in (
         rejection_message("ln -f source data/generated/file.txt", _config()) or ""
+    )
+
+
+def test_blocks_target_directory_writes_to_generated_paths() -> None:
+    assert "generated output" in (
+        rejection_message("cp --target-directory=data/generated source.txt", _config())
+        or ""
+    )
+    assert "generated output" in (
+        rejection_message("install -t data/generated source.txt", _config()) or ""
+    )
+
+
+def test_blocks_expanded_redirection_targets() -> None:
+    assert "unresolved shell expansion targets" in (
+        rejection_message('printf x > "$(printf data/generated/file.txt)"', _config())
+        or ""
     )
 
 

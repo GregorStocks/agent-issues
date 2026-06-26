@@ -130,21 +130,25 @@ def _shell_tokens(command: str) -> list[str] | None:
         return None
 
 
-def _shell_segments(command: str) -> list[list[str]]:
+def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]:
     tokens = _shell_tokens(command)
     if not tokens:
         return []
 
-    segments: list[list[str]] = []
+    segments: list[tuple[list[str], str]] = []
     separators = {"&&", "||", ";", "|", "&"}
     start = 0
     for index, token in enumerate([*tokens, ";"]):
         if token in separators:
             segment = tokens[start:index]
             if segment:
-                segments.append(segment)
+                segments.append((segment, token))
             start = index + 1
     return segments
+
+
+def _shell_segments(command: str) -> list[list[str]]:
+    return [segment for segment, _separator in _shell_segments_with_separators(command)]
 
 
 _HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_-]*)\1")
@@ -498,6 +502,14 @@ def _git_inline_alias_payload(invocation: Invocation) -> str | None:
     return f"git {alias} {rest}".strip()
 
 
+def _git_writes_alias(invocation: Invocation) -> bool:
+    subcommand = _git_subcommand(invocation)
+    if subcommand is None:
+        return False
+    name, rest = subcommand
+    return name == "config" and any(arg.startswith("alias.") for arg in rest)
+
+
 def _trap_payload(invocation: Invocation) -> str | None:
     if invocation.basename != "trap":
         return None
@@ -612,31 +624,53 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
             continue
         if name == "sudo":
             index += 1
-            index = _skip_options(
-                tokens,
-                index,
-                {
-                    "-C",
-                    "-D",
-                    "-R",
-                    "-T",
-                    "-g",
-                    "-h",
-                    "-p",
-                    "-r",
-                    "-t",
-                    "-u",
-                    "--chdir",
-                    "--chroot",
-                    "--command-timeout",
-                    "--group",
-                    "--host",
-                    "--prompt",
-                    "--role",
-                    "--type",
-                    "--user",
-                },
-            )
+            sudo_opts_with_arg = {
+                "-C",
+                "-R",
+                "-T",
+                "-g",
+                "-h",
+                "-p",
+                "-r",
+                "-t",
+                "-u",
+                "--chroot",
+                "--command-timeout",
+                "--group",
+                "--host",
+                "--prompt",
+                "--role",
+                "--type",
+                "--user",
+            }
+            while index < len(tokens):
+                token = tokens[index]
+                if token == "--":
+                    index += 1
+                    break
+                if token in {"-D", "--chdir"} and index + 1 < len(tokens):
+                    wrapper_cwd = _clean_path(tokens[index + 1], cwd=wrapper_cwd)
+                    index += 2
+                    continue
+                if token.startswith("--chdir="):
+                    wrapper_cwd = _clean_path(token.split("=", 1)[1], cwd=wrapper_cwd)
+                    index += 1
+                    continue
+                if token.startswith("-D") and len(token) > 2:
+                    wrapper_cwd = _clean_path(token[2:], cwd=wrapper_cwd)
+                    index += 1
+                    continue
+                option_name = token.split("=", 1)[0]
+                if token.startswith("-") and token not in {"-", "--"}:
+                    index += 1
+                    if (
+                        "=" not in token
+                        and option_name in sudo_opts_with_arg
+                        and index < len(tokens)
+                    ):
+                        index += 1
+                    continue
+                break
             continue
         if name == "nice":
             index += 1
@@ -767,7 +801,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
     for body in _extract_backticks(command):
         invocations.extend(command_invocations(body, initial_cwd=cwd))
     invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
-    for tokens in _shell_segments(command):
+    for tokens, next_separator in _shell_segments_with_separators(command):
         function_body = _function_body_tokens(tokens)
         if function_body:
             invocations.extend(command_invocations(" ".join(function_body), initial_cwd=cwd))
@@ -818,7 +852,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
         invocations.append(invocation)
-        if invocation.basename == "cd" and invocation.args:
+        if invocation.basename == "cd" and invocation.args and next_separator != "||":
             old_cwd = cwd
             if invocation.args[0] == "-":
                 cwd = previous_cwd
@@ -1172,6 +1206,66 @@ def _arg_targets_generated(
     )
 
 
+def _writer_arg_targets_generated(
+    invocation: Invocation,
+    paths: tuple[str, ...],
+    *,
+    include_ancestors: bool = False,
+) -> bool:
+    target_directory_commands = {"cp", "install", "ln", "mv"}
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if invocation.basename in target_directory_commands:
+            if arg in {"-t", "--target-directory"} and index + 1 < len(args):
+                if _arg_targets_generated(
+                    args[index + 1],
+                    paths,
+                    include_ancestors=include_ancestors,
+                    cwd=invocation.cwd,
+                ):
+                    return True
+                index += 2
+                continue
+            if arg.startswith("--target-directory="):
+                if _arg_targets_generated(
+                    arg.split("=", 1)[1],
+                    paths,
+                    include_ancestors=include_ancestors,
+                    cwd=invocation.cwd,
+                ):
+                    return True
+                index += 1
+                continue
+            if arg.startswith("-t") and len(arg) > 2:
+                if _arg_targets_generated(
+                    arg[2:],
+                    paths,
+                    include_ancestors=include_ancestors,
+                    cwd=invocation.cwd,
+                ):
+                    return True
+                index += 1
+                continue
+        if _arg_targets_generated(
+            arg,
+            paths,
+            include_ancestors=include_ancestors,
+            cwd=invocation.cwd,
+        ):
+            return True
+        index += 1
+    return False
+
+
+def _git_uses_pathspec_from_file(args: list[str]) -> bool:
+    return any(
+        arg == "--pathspec-from-file" or arg.startswith("--pathspec-from-file=")
+        for arg in args
+    )
+
+
 def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if not config.generated_paths:
         return False
@@ -1186,14 +1280,10 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
         "rmdir",
         "ln",
     }:
-        return any(
-            _arg_targets_generated(
-                arg,
-                config.generated_paths,
-                include_ancestors=True,
-                cwd=invocation.cwd,
-            )
-            for arg in invocation.args
+        return _writer_arg_targets_generated(
+            invocation,
+            config.generated_paths,
+            include_ancestors=True,
         )
     if invocation.basename == "tee":
         return any(
@@ -1242,6 +1332,8 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if name == "reset" and "--hard" in rest:
         return True
     if name == "checkout" and _pathless_forced_checkout(rest):
+        return True
+    if name in {"checkout", "restore"} and _git_uses_pathspec_from_file(rest):
         return True
     if name in {"rm", "mv"}:
         return any(
@@ -1385,6 +1477,12 @@ def rejection_message(
             if alias_message is not None:
                 return alias_message
 
+        if _git_writes_alias(invocation):
+            return (
+                "Do not create or update Git aliases inside hook-checked commands; "
+                "configured aliases can hide policy-relevant git subcommands."
+            )
+
         chain = _gh_chain(invocation)
         if chain and chain[0] == "issue":
             return f"Do not use GitHub Issues. This project tracks issues with {config.github_issue_guidance}."
@@ -1413,14 +1511,20 @@ def rejection_message(
                     "immediately before git."
                 )
 
-        if config.generated_paths and any(
-            _arg_targets_generated(target, config.generated_paths, cwd=invocation.cwd)
-            for target in invocation.redirection_targets
-        ):
-            return (
-                "Do not redirect shell output into generated output paths. "
-                f"The only supported way to update them is `{config.generated_command}`."
-            )
+        if config.generated_paths:
+            if any("$" in target for target in invocation.redirection_targets):
+                return (
+                    "Do not redirect shell output to unresolved shell expansion targets; "
+                    "the hook cannot verify the file that Bash will open."
+                )
+            if any(
+                _arg_targets_generated(target, config.generated_paths, cwd=invocation.cwd)
+                for target in invocation.redirection_targets
+            ):
+                return (
+                    "Do not redirect shell output into generated output paths. "
+                    f"The only supported way to update them is `{config.generated_command}`."
+                )
 
         if _generated_mutation(invocation, config):
             return (
