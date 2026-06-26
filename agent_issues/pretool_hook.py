@@ -824,6 +824,65 @@ def _env_split_payload(tokens: list[str]) -> tuple[str, str] | None:
     return None
 
 
+_XARGS_OPTS_WITH_ARG = {
+    "-a",
+    "--arg-file",
+    "-d",
+    "--delimiter",
+    "-E",
+    "-e",
+    "--eof",
+    "-I",
+    "-i",
+    "--replace",
+    "-L",
+    "-l",
+    "--max-lines",
+    "-n",
+    "--max-args",
+    "-P",
+    "--max-procs",
+    "-s",
+    "--max-chars",
+}
+
+
+def _xargs_payload(invocation: Invocation) -> str | None:
+    if invocation.basename != "xargs":
+        return None
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            index += 1
+            break
+        if token in _XARGS_OPTS_WITH_ARG and index + 1 < len(args):
+            index += 2
+            continue
+        if token.startswith("--") and "=" in token:
+            index += 1
+            continue
+        if (
+            token.startswith("-I")
+            or token.startswith("-i")
+            or token.startswith("-L")
+            or token.startswith("-l")
+            or token.startswith("-n")
+            or token.startswith("-P")
+            or token.startswith("-s")
+        ) and len(token) > 2:
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    if index >= len(args):
+        return None
+    return " ".join(shlex.quote(arg) for arg in args[index:])
+
+
 def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocation]:
     """Return executable invocations, following common transparent wrappers."""
 
@@ -899,6 +958,10 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
                     cwd=invocation.cwd,
                 )
             )
+            continue
+        payload = _xargs_payload(invocation)
+        if payload is not None:
+            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
         invocations.append(invocation)
         if (
@@ -994,13 +1057,13 @@ def _git_subcommand(invocation: Invocation) -> tuple[str, list[str]] | None:
 
 
 def _git_push_args(invocation: Invocation) -> list[str] | None:
-    if invocation.basename == "git-push":
+    if invocation.basename in {"git-push", "git-send-pack"}:
         return list(invocation.args)
     subcommand = _git_subcommand(invocation)
     if subcommand is None:
         return None
     name, rest = subcommand
-    if name != "push":
+    if name not in {"push", "send-pack"}:
         return None
     return rest
 
@@ -1206,7 +1269,10 @@ def _make_targets(invocation: Invocation) -> list[str]:
 
 
 def _clean_path(path: str, *, cwd: str = ".") -> str:
-    path = path.removeprefix(":(top)")
+    if path.startswith(":("):
+        magic_end = path.find(")")
+        if magic_end != -1:
+            path = path[magic_end + 1 :]
     path = path.removeprefix(":/")
     path = path.removeprefix("./")
     path_obj = Path(path)

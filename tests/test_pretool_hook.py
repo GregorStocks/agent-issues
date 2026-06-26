@@ -60,6 +60,25 @@ def test_blocks_direct_git_push_helper() -> None:
     )
 
 
+def test_blocks_git_send_pack_publish() -> None:
+    assert "agent-submit" in (
+        rejection_message(
+            "git send-pack git@github.com:org/repo.git HEAD:refs/heads/branch",
+            _config(),
+            dirty_generated_output=False,
+        )
+        or ""
+    )
+    assert "agent-submit" in (
+        rejection_message(
+            "git-send-pack git@github.com:org/repo.git HEAD:refs/heads/branch",
+            _config(),
+            dirty_generated_output=False,
+        )
+        or ""
+    )
+
+
 def test_blocks_gh_pr_edit_and_gh_issue_with_flags() -> None:
     assert "agent-submit" in (
         rejection_message("gh -R owner/repo pr edit 12 --title T", _config()) or ""
@@ -154,6 +173,16 @@ def test_blocks_stdin_fed_shells() -> None:
     )
     assert "pipe unresolved stdin into a shell" in (
         rejection_message("sh < <(printf 'git push origin HEAD\\n')", _config()) or ""
+    )
+
+
+def test_inspects_xargs_payloads() -> None:
+    assert "agent-submit" in (
+        rejection_message("echo origin HEAD | xargs git push", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("echo HEAD | xargs -I{} git send-pack repo {}", _config())
+        or ""
     )
 
 
@@ -574,6 +603,13 @@ def test_blocks_git_rm_and_mv_generated_paths() -> None:
 def test_blocks_git_top_level_pathspec_generated_paths() -> None:
     assert "generated output" in (
         rejection_message("git restore :/data/generated/file.txt", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message(
+            "git restore ':(top,literal)data/generated/file.txt'",
+            _config(),
+        )
+        or ""
     )
 
 
