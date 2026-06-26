@@ -478,6 +478,12 @@ def test_subshell_cd_does_not_change_parent_cwd() -> None:
     )
 
 
+def test_pipeline_cd_does_not_change_parent_cwd() -> None:
+    assert "generated output" in (
+        rejection_message("cd /tmp | rm data/generated/file.txt", _config()) or ""
+    )
+
+
 def test_generated_path_matching_resolves_cd_dash() -> None:
     assert "generated output" in (
         rejection_message(
@@ -538,6 +544,16 @@ def test_inline_git_aliases_are_inspected() -> None:
 def test_blocks_git_config_alias_writes() -> None:
     assert "Git aliases" in (
         rejection_message("git config alias.p 'push origin HEAD'; git p", _config()) or ""
+    )
+
+
+def test_blocks_git_config_includes() -> None:
+    assert "additional Git config" in (
+        rejection_message("git -c include.path=/tmp/cfg p", _config()) or ""
+    )
+    assert "additional Git config" in (
+        rejection_message("CFG=/tmp/cfg git --config-env=include.path=CFG p", _config())
+        or ""
     )
 
 

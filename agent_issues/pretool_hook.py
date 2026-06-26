@@ -527,6 +527,25 @@ def _git_inline_alias_payload(invocation: Invocation) -> str | None:
     return f"git {alias} {rest}".strip()
 
 
+def _git_uses_config_include(invocation: Invocation) -> bool:
+    if invocation.basename != "git":
+        return False
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        info = _git_global_option_info(args, index)
+        if info is None:
+            return False
+        option, config_value, next_index = info
+        index = next_index
+        if option not in {"-c", "--config-env"} or config_value is None:
+            continue
+        key = config_value.partition("=")[0]
+        if key == "include.path" or key.startswith("includeIf."):
+            return True
+    return False
+
+
 def _git_writes_alias(invocation: Invocation) -> bool:
     subcommand = _git_subcommand(invocation)
     if subcommand is None:
@@ -968,7 +987,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             invocation.basename == "cd"
             and invocation.args
             and "(" not in tokens
-            and next_separator != "||"
+            and next_separator not in {"||", "|", "&"}
         ):
             old_cwd = cwd
             if invocation.args[0] == "-":
@@ -1614,6 +1633,12 @@ def rejection_message(
             )
             if trap_message is not None:
                 return trap_message
+
+        if _git_uses_config_include(invocation):
+            return (
+                "Do not load additional Git config inside hook-checked commands; "
+                "included config can define aliases that hide policy-relevant git subcommands."
+            )
 
         alias_payload = _git_inline_alias_payload(invocation)
         if alias_payload is not None:
