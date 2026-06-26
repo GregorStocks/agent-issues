@@ -122,8 +122,9 @@ def load_config(path: Path | str | None = None) -> HookConfig:
 
 
 def _shell_tokens(command: str) -> list[str] | None:
+    command = _normalize_shell_newlines(command)
     try:
-        lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
@@ -142,6 +143,43 @@ def _shell_tokens(command: str) -> list[str] | None:
     return normalized
 
 
+def _normalize_shell_newlines(command: str) -> str:
+    output: list[str] = []
+    in_single = False
+    in_double = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == "\\" and index + 1 < len(command) and not in_single:
+            output.append(command[index : index + 2])
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            output.append(char)
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            output.append(char)
+            index += 1
+            continue
+        if char == "#" and not in_single and not in_double:
+            while index < len(command) and command[index] != "\n":
+                index += 1
+            if index < len(command):
+                output.append(" ; ")
+                index += 1
+            continue
+        if char == "\n" and not in_single and not in_double:
+            output.append(" ; ")
+            index += 1
+            continue
+        output.append(char)
+        index += 1
+    return "".join(output)
+
+
 def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]:
     tokens = _shell_tokens(command)
     if not tokens:
@@ -150,12 +188,23 @@ def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]
     segments: list[tuple[list[str], str]] = []
     separators = {"&&", "||", ";", "|", "&"}
     start = 0
+    substitution_depth = 0
+    previous = ""
     for index, token in enumerate([*tokens, ";"]):
-        if token in separators:
+        starts_substitution = (
+            token == "(" and previous == "$"
+        ) or token.startswith("<(") or token.startswith(">(")
+        if starts_substitution:
+            substitution_depth += 1
+        elif token == ")" and substitution_depth:
+            substitution_depth -= 1
+
+        if token in separators and substitution_depth == 0:
             segment = tokens[start:index]
             if segment:
                 segments.append((segment, token))
             start = index + 1
+        previous = token
     return segments
 
 
@@ -488,6 +537,16 @@ def _git_cwd(invocation: Invocation) -> str:
 
 def _git_option_aliases(invocation: Invocation) -> tuple[dict[str, str], int]:
     aliases: dict[str, str] = {}
+    try:
+        config_count = int(invocation.env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        config_count = 0
+    for config_index in range(config_count):
+        key = invocation.env.get(f"GIT_CONFIG_KEY_{config_index}", "").lower()
+        value = invocation.env.get(f"GIT_CONFIG_VALUE_{config_index}", "")
+        if key.startswith("alias."):
+            aliases[key.removeprefix("alias.")] = value
+
     args = list(invocation.args)
     index = 0
     while index < len(args):
@@ -531,6 +590,15 @@ def _git_inline_alias_payload(invocation: Invocation) -> str | None:
 def _git_uses_config_include(invocation: Invocation) -> bool:
     if invocation.basename != "git":
         return False
+    try:
+        config_count = int(invocation.env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        config_count = 0
+    for config_index in range(config_count):
+        key = invocation.env.get(f"GIT_CONFIG_KEY_{config_index}", "").lower()
+        if key == "include.path" or key.startswith("includeif."):
+            return True
+
     args = list(invocation.args)
     index = 0
     while index < len(args):
@@ -938,6 +1006,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
     for body in shell_heredocs:
         invocations.extend(command_invocations(body, initial_cwd=cwd))
     invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
+    pending_or_cwd: tuple[str, str] | None = None
     for tokens, next_separator in _shell_segments_with_separators(command):
         segment_command = _segment_command(tokens)
         for body in _extract_subshells(segment_command):
@@ -1008,23 +1077,46 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             continue
         payload = _xargs_payload(invocation)
         if payload is not None:
-            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            payload_invocations = command_invocations(payload, initial_cwd=invocation.cwd)
+            invocations.extend(payload_invocations)
+            if any(
+                payload_invocation.basename in _POLICY_RELEVANT_COMMANDS
+                for payload_invocation in payload_invocations
+            ):
+                invocations.append(
+                    Invocation(
+                        env=invocation.env,
+                        executable="__agent_issues_xargs_policy__",
+                        args=invocation.args,
+                        cwd=invocation.cwd,
+                    )
+                )
             continue
         invocations.append(invocation)
         if (
             invocation.basename == "cd"
             and invocation.args
             and "(" not in tokens
-            and next_separator not in {"||", "|", "&"}
+            and next_separator not in {"|", "&"}
         ):
             target = _cd_target(invocation.args)
             if target is not None:
                 old_cwd = cwd
-                if target == "-":
-                    cwd = previous_cwd
+                next_cwd = previous_cwd if target == "-" else _clean_path(target, cwd=cwd)
+                if next_separator == "||":
+                    pending_or_cwd = (next_cwd, old_cwd)
                 else:
-                    cwd = _clean_path(target, cwd=cwd)
-                previous_cwd = old_cwd
+                    cwd = next_cwd
+                    previous_cwd = old_cwd
+        elif (
+            pending_or_cwd is not None
+            and invocation.basename in {"exit", "return"}
+            and next_separator == ";"
+        ):
+            cwd, previous_cwd = pending_or_cwd
+            pending_or_cwd = None
+        elif next_separator == ";":
+            pending_or_cwd = None
     return invocations
 
 
@@ -1703,6 +1795,12 @@ def rejection_message(
             return (
                 "Do not pipe unresolved stdin into a shell; the hook cannot verify "
                 "the script that the shell will execute."
+            )
+
+        if invocation.basename == "__agent_issues_xargs_policy__":
+            return (
+                "Do not launch policy-relevant commands through xargs; stdin-supplied "
+                "operands can hide what the command will mutate or publish."
             )
 
         if _policy_relevant_invocation_has_expansion(invocation):

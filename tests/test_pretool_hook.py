@@ -45,6 +45,12 @@ def test_blocks_raw_git_push() -> None:
     assert "agent-submit" in message
 
 
+def test_comment_newline_does_not_hide_following_command() -> None:
+    assert "agent-submit" in (
+        rejection_message("echo ok # comment\ngit push origin HEAD", _config()) or ""
+    )
+
+
 def test_blocks_direct_git_push_helper() -> None:
     assert "agent-submit" in (
         rejection_message("git-push origin HEAD", _config(), dirty_generated_output=False)
@@ -202,6 +208,13 @@ def test_inspects_xargs_payloads() -> None:
     )
 
 
+def test_blocks_policy_relevant_xargs_with_stdin_operands() -> None:
+    assert "xargs" in (
+        rejection_message("printf 'data/generated/file.txt\\n' | xargs rm", _config())
+        or ""
+    )
+
+
 def test_recurses_into_shell_here_string_payload() -> None:
     assert "agent-submit" in (
         rejection_message("bash <<< 'git push origin HEAD'", _config()) or ""
@@ -305,6 +318,9 @@ def test_env_split_string_keeps_trailing_command() -> None:
 def test_inspects_command_and_process_substitutions() -> None:
     assert "agent-submit" in (
         rejection_message("echo $(git push origin HEAD)", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("echo $(git push origin HEAD; true)", _config()) or ""
     )
     assert "pkill/killall" in (rejection_message("cat <(pkill python)", _config()) or "")
 
@@ -515,6 +531,12 @@ def test_pipeline_cd_does_not_change_parent_cwd() -> None:
     )
 
 
+def test_guarded_cd_success_updates_later_cwd() -> None:
+    assert "generated output" in (
+        rejection_message("cd data || exit 1; rm generated/file.txt", _config()) or ""
+    )
+
+
 def test_generated_path_matching_resolves_cd_dash() -> None:
     assert "generated output" in (
         rejection_message(
@@ -605,6 +627,17 @@ def test_git_config_env_aliases_are_inspected() -> None:
     assert "agent-submit" in (
         rejection_message(
             "GITALIAS='push origin HEAD' git --config-env=alias.p=GITALIAS p",
+            _config(),
+        )
+        or ""
+    )
+
+
+def test_git_counted_env_aliases_are_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message(
+            "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p "
+            "GIT_CONFIG_VALUE_0='push origin HEAD' git p",
             _config(),
         )
         or ""
