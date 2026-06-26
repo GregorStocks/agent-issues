@@ -477,6 +477,12 @@ def test_generated_path_matching_tracks_cd_segments() -> None:
     )
 
 
+def test_generated_path_matching_tracks_cd_with_options() -> None:
+    assert "generated output" in (
+        rejection_message("cd -P data && rm generated/file.txt", _config()) or ""
+    )
+
+
 def test_substitution_uses_cwd_after_cd() -> None:
     assert "generated output" in (
         rejection_message("cd data && echo $(rm generated/file.txt)", _config()) or ""
@@ -549,6 +555,9 @@ def test_inline_git_aliases_are_inspected() -> None:
     )
     assert "agent-submit" in (
         rejection_message("git -p -c alias.p='push origin HEAD' p", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("git -c Alias.p='push origin HEAD' p", _config()) or ""
     )
 
 
@@ -691,6 +700,10 @@ def test_blocks_target_directory_writes_to_generated_paths() -> None:
     )
     assert "generated output" in (
         rejection_message("install -t data/generated source.txt", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("install source.txt data/generated/file.txt -m 755", _config())
+        or ""
     )
 
 

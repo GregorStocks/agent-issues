@@ -500,6 +500,7 @@ def _git_option_aliases(invocation: Invocation) -> tuple[dict[str, str], int]:
             continue
 
         key, sep, value = config_value.partition("=") if config_value else ("", "", "")
+        key = key.lower()
         if not sep or not key.startswith("alias."):
             continue
         if option == "--config-env":
@@ -540,8 +541,8 @@ def _git_uses_config_include(invocation: Invocation) -> bool:
         index = next_index
         if option not in {"-c", "--config-env"} or config_value is None:
             continue
-        key = config_value.partition("=")[0]
-        if key == "include.path" or key.startswith("includeIf."):
+        key = config_value.partition("=")[0].lower()
+        if key == "include.path" or key.startswith("includeif."):
             return True
     return False
 
@@ -914,6 +915,19 @@ def _xargs_payload(invocation: Invocation) -> str | None:
     return " ".join(shlex.quote(arg) for arg in args[index:])
 
 
+def _cd_target(args: tuple[str, ...]) -> str | None:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            return args[index + 1] if index + 1 < len(args) else None
+        if arg in {"-L", "-P", "-e", "-@"}:
+            index += 1
+            continue
+        return arg
+    return None
+
+
 def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocation]:
     """Return executable invocations, following common transparent wrappers."""
 
@@ -1003,12 +1017,14 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             and "(" not in tokens
             and next_separator not in {"||", "|", "&"}
         ):
-            old_cwd = cwd
-            if invocation.args[0] == "-":
-                cwd = previous_cwd
-            else:
-                cwd = _clean_path(invocation.args[0], cwd=cwd)
-            previous_cwd = old_cwd
+            target = _cd_target(invocation.args)
+            if target is not None:
+                old_cwd = cwd
+                if target == "-":
+                    cwd = previous_cwd
+                else:
+                    cwd = _clean_path(target, cwd=cwd)
+                previous_cwd = old_cwd
     return invocations
 
 
@@ -1374,6 +1390,21 @@ def _writer_arg_targets_generated(
 ) -> bool:
     target_directory_commands = {"cp", "install", "ln", "mv"}
     destination_only_commands = {"cp", "install", "ln"}
+    destination_option_args = {
+        "cp": {"-S", "--suffix"},
+        "install": {
+            "-g",
+            "--group",
+            "-m",
+            "--mode",
+            "-o",
+            "--owner",
+            "-S",
+            "--suffix",
+            "--strip-program",
+        },
+        "ln": {"-S", "--suffix"},
+    }
     args = list(invocation.args)
     operands: list[str] = []
     index = 0
@@ -1414,6 +1445,24 @@ def _writer_arg_targets_generated(
             if arg == "--":
                 operands.extend(args[index + 1 :])
                 break
+            option_name = arg.split("=", 1)[0]
+            if (
+                option_name in destination_option_args[invocation.basename]
+                and index + 1 < len(args)
+                and "=" not in arg
+            ):
+                index += 2
+                continue
+            if option_name in destination_option_args[invocation.basename]:
+                index += 1
+                continue
+            if (
+                invocation.basename == "install"
+                and (arg.startswith("-m") or arg.startswith("-g") or arg.startswith("-o"))
+                and len(arg) > 2
+            ):
+                index += 1
+                continue
             if arg.startswith("-"):
                 index += 1
                 continue
