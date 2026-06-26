@@ -388,6 +388,8 @@ _GIT_GLOBAL_OPTS_NO_ARG = {
     "--paginate",
 }
 
+_UNRESOLVED_GIT_CONFIG_ENV_ALIAS = "__AGENT_ISSUES_UNRESOLVED_GIT_CONFIG_ENV_ALIAS__"
+
 
 def _git_global_option_info(args: list[str], index: int) -> tuple[str, str | None, int] | None:
     token = args[index]
@@ -437,7 +439,7 @@ def _git_option_aliases(invocation: Invocation) -> tuple[dict[str, str], int]:
         if not sep or not key.startswith("alias."):
             continue
         if option == "--config-env":
-            value = invocation.env.get(value, "")
+            value = invocation.env.get(value, _UNRESOLVED_GIT_CONFIG_ENV_ALIAS)
         aliases[key.removeprefix("alias.")] = value
     return aliases, index
 
@@ -453,6 +455,8 @@ def _git_inline_alias_payload(invocation: Invocation) -> str | None:
     alias = aliases.get(subcommand)
     if alias is None:
         return None
+    if alias == _UNRESOLVED_GIT_CONFIG_ENV_ALIAS:
+        return "eval $AGENT_ISSUES_UNRESOLVED_GIT_CONFIG_ENV_ALIAS"
     rest = " ".join(shlex.quote(arg) for arg in args[index + 1 :])
     if alias.startswith("!"):
         return f"{alias[1:]} {rest}".strip()
@@ -1171,6 +1175,12 @@ def rejection_message(
                 "Only kill processes by specific PID after verifying the PID."
             )
 
+        if invocation.basename == "shopt" and "expand_aliases" in invocation.args:
+            return (
+                "Do not enable shell alias expansion in hook-checked commands; "
+                "aliases can hide commands from static policy checks."
+            )
+
         if invocation.basename == "eval" and any("$" in arg for arg in invocation.args):
             return (
                 "Do not use eval with unresolved shell expansions; the hook cannot "
@@ -1196,7 +1206,7 @@ def rejection_message(
                 config,
                 timeout_ms=timeout_ms,
                 dirty_generated_output=dirty_generated_output,
-                cwd=invocation.cwd,
+                cwd=_git_cwd(invocation),
             )
             if alias_message is not None:
                 return alias_message

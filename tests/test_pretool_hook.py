@@ -247,6 +247,13 @@ def test_inspects_case_arm_bodies() -> None:
     )
 
 
+def test_blocks_shell_alias_expansion() -> None:
+    assert "alias expansion" in (
+        rejection_message("shopt -s expand_aliases\nalias p='git push origin HEAD'\np", _config())
+        or ""
+    )
+
+
 def test_git_switch_guess_does_not_hide_branch_target() -> None:
     assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
         rejection_message("git switch --guess feature", _config()) or ""
@@ -402,10 +409,27 @@ def test_git_config_env_aliases_are_inspected() -> None:
     )
 
 
+def test_unresolved_git_config_env_alias_is_blocked() -> None:
+    assert "eval with unresolved shell expansions" in (
+        rejection_message(
+            "export GITALIAS='push origin HEAD'; git --config-env=alias.p=GITALIAS p",
+            _config(),
+        )
+        or ""
+    )
+
+
 def test_git_alias_payload_preserves_cwd() -> None:
     assert "generated output" in (
         rejection_message(
             "cd data && git -c alias.r='restore generated/file.txt' r",
+            _config(),
+        )
+        or ""
+    )
+    assert "generated output" in (
+        rejection_message(
+            "git -C data -c alias.r='restore generated/file.txt' r",
             _config(),
         )
         or ""
