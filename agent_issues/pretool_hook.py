@@ -167,7 +167,8 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
     while index < len(lines):
         line = lines[index]
         tokens = _shell_tokens(line) or []
-        specs = _heredoc_specs(line)
+        has_heredoc_operator = "<<" in tokens or "<<-" in tokens
+        specs = _heredoc_specs(line) if has_heredoc_operator else []
         if not specs:
             output.append(line)
             index += 1
@@ -199,6 +200,39 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
                 shell_bodies.extend(_extract_subshells(expansion_text))
                 shell_bodies.extend(_extract_backticks(expansion_text))
     return "".join(output), shell_bodies
+
+
+def _stdin_shell_pipeline_invocations(command: str, *, cwd: str) -> list[Invocation]:
+    tokens = _shell_tokens(command)
+    if not tokens or "|" not in tokens:
+        return []
+
+    invocations: list[Invocation] = []
+    separators = {"&&", "||", ";", "|", "&"}
+    index = 0
+    while index < len(tokens):
+        if tokens[index] != "|":
+            index += 1
+            continue
+        end = index + 1
+        while end < len(tokens) and tokens[end] not in separators:
+            end += 1
+        invocation = _unwrap_invocation(tokens[index + 1 : end])
+        if (
+            invocation is not None
+            and invocation.basename in {"sh", "bash", "zsh", "dash"}
+            and _shell_c_payload(invocation) is None
+        ):
+            invocations.append(
+                Invocation(
+                    env=invocation.env,
+                    executable="__agent_issues_stdin_shell__",
+                    args=invocation.args,
+                    cwd=cwd,
+                )
+            )
+        index = end
+    return invocations
 
 
 def _extract_subshells(command: str) -> list[str]:
@@ -722,6 +756,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         invocations.extend(command_invocations(body, initial_cwd=cwd))
     for body in _extract_backticks(command):
         invocations.extend(command_invocations(body, initial_cwd=cwd))
+    invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
     for tokens in _shell_segments(command):
         function_body = _function_body_tokens(tokens)
         if function_body:
@@ -763,7 +798,10 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
 
         payload = _shell_c_payload(invocation)
         if payload is not None:
-            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            if "$" in payload:
+                invocations.append(invocation)
+            else:
+                invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
         invocations.append(invocation)
         if invocation.basename == "cd" and invocation.args:
@@ -926,6 +964,30 @@ def _branch_switch_target(invocation: Invocation) -> str | None:
     if name == "checkout":
         return _branch_target(rest, _CHECKOUT_OPTS_WITH_ARG, checkout=True)
     return None
+
+
+def _pathless_forced_checkout(args: list[str]) -> bool:
+    forced = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            return forced and index == len(args) - 1
+        if token in {"-f", "--force"} or (
+            token.startswith("-") and not token.startswith("--") and "f" in token[1:]
+        ):
+            forced = True
+            index += 1
+            continue
+        if token in _CHECKOUT_OPTS_WITH_ARG:
+            return False
+        if token.startswith("--pathspec-from-file="):
+            return False
+        if token.startswith("-"):
+            index += 1
+            continue
+        return False
+    return forced
 
 
 def _gh_chain(invocation: Invocation) -> list[str]:
@@ -1128,6 +1190,8 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
         )
     if name == "reset" and "--hard" in rest:
         return True
+    if name == "checkout" and _pathless_forced_checkout(rest):
+        return True
     if name in {"rm", "mv"}:
         return any(
             _arg_targets_generated(
@@ -1224,6 +1288,19 @@ def rejection_message(
             return (
                 "Do not use eval with unresolved shell expansions; the hook cannot "
                 "verify the command that eval will execute."
+            )
+
+        shell_payload = _shell_c_payload(invocation)
+        if shell_payload is not None and "$" in shell_payload:
+            return (
+                "Do not use shell -c with unresolved shell expansions; the hook "
+                "cannot verify the command that the nested shell will execute."
+            )
+
+        if invocation.basename == "__agent_issues_stdin_shell__":
+            return (
+                "Do not pipe unresolved stdin into a shell; the hook cannot verify "
+                "the script that the shell will execute."
             )
 
         trap_payload = _trap_payload(invocation)

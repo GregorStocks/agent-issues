@@ -141,6 +141,19 @@ def test_recurses_into_shell_c_payload() -> None:
     assert "agent-submit" in message
 
 
+def test_blocks_unresolved_shell_c_payload() -> None:
+    assert "shell -c with unresolved shell expansions" in (
+        rejection_message("cmd='git push origin HEAD'; bash -c \"$cmd\"", _config())
+        or ""
+    )
+
+
+def test_blocks_stdin_fed_shells() -> None:
+    assert "pipe unresolved stdin into a shell" in (
+        rejection_message("printf 'git push origin HEAD\\n' | sh", _config()) or ""
+    )
+
+
 def test_recurses_into_shell_c_option_clusters() -> None:
     assert "agent-submit" in (
         rejection_message("bash -lc 'git push origin HEAD'", _config()) or ""
@@ -336,6 +349,14 @@ def test_blocks_generated_path_ancestor_mutations() -> None:
     assert "generated output" in (rejection_message("git checkout -- .", _config()) or "")
 
 
+def test_blocks_pathless_forced_checkout_as_tree_mutation() -> None:
+    assert "generated output" in (rejection_message("git checkout -f", _config()) or "")
+    assert "generated output" in (
+        rejection_message("git checkout --force", _config()) or ""
+    )
+    assert rejection_message("git checkout -f -- file.txt", _config()) is None
+
+
 def test_blocks_pathless_git_clean_as_tree_mutation() -> None:
     assert "generated output" in (rejection_message("git clean -fdx", _config()) or "")
 
@@ -527,6 +548,11 @@ def test_binary_block_matching_uses_invocation_cwd() -> None:
 def test_heredoc_literal_body_is_not_parsed_as_command() -> None:
     command = "cat <<'EOF' > /tmp/message\n" "git push origin HEAD\n" "EOF\n"
     assert rejection_message(command, _config()) is None
+
+
+def test_quoted_heredoc_marker_does_not_hide_following_command() -> None:
+    command = "echo '<<EOF'\n" "git push origin HEAD\n"
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
 
 
 def test_unquoted_heredoc_expansions_are_inspected() -> None:
