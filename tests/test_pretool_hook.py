@@ -116,6 +116,17 @@ def test_blocks_generated_output_mutation() -> None:
     assert "generated output" in message
 
 
+def test_blocks_long_in_place_generated_output_mutation() -> None:
+    assert "generated output" in (
+        rejection_message("sed --in-place s/a/b/ data/generated/file.txt", _config())
+        or ""
+    )
+    assert "generated output" in (
+        rejection_message("perl -i -pe 's/a/b/' data/generated/file.txt", _config())
+        or ""
+    )
+
+
 def test_blocks_git_push_when_generated_output_is_dirty() -> None:
     message = rejection_message(
         "git push origin HEAD",
@@ -206,6 +217,9 @@ def test_blocks_unresolved_policy_relevant_expansions() -> None:
     )
     assert "unresolved shell expansions" in (
         rejection_message("`printf git` push origin HEAD", _config()) or ""
+    )
+    assert "unresolved shell expansions" in (
+        rejection_message("g{i..i}t p{u..u}sh origin HEAD", _config()) or ""
     )
     assert rejection_message("echo \"$HOME\"", _config()) is None
 
@@ -564,6 +578,9 @@ def test_inline_git_aliases_are_inspected() -> None:
 def test_blocks_git_config_alias_writes() -> None:
     assert "Git aliases" in (
         rejection_message("git config alias.p 'push origin HEAD'; git p", _config()) or ""
+    )
+    assert "Git aliases" in (
+        rejection_message("git config Alias.p 'push origin HEAD'; git p", _config()) or ""
     )
 
 

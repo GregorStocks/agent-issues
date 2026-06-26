@@ -552,7 +552,7 @@ def _git_writes_alias(invocation: Invocation) -> bool:
     if subcommand is None:
         return False
     name, rest = subcommand
-    return name == "config" and any(arg.startswith("alias.") for arg in rest)
+    return name == "config" and any(arg.lower().startswith("alias.") for arg in rest)
 
 
 def _trap_payload(invocation: Invocation) -> str | None:
@@ -1279,7 +1279,11 @@ _POLICY_RELEVANT_COMMANDS = {
 
 
 def _has_unresolved_shell_expansion(value: str) -> bool:
-    return "$" in value or "`" in value
+    return (
+        "$" in value
+        or "`" in value
+        or bool(re.search(r"\{[^{}]*(?:,|\.\.)[^{}]*\}", value))
+    )
 
 
 def _policy_relevant_invocation_has_expansion(invocation: Invocation) -> bool:
@@ -1494,6 +1498,22 @@ def _git_uses_pathspec_from_file(args: list[str]) -> bool:
     )
 
 
+def _sed_in_place(args: tuple[str, ...]) -> bool:
+    return any(
+        arg.startswith("-i") or arg == "--in-place" or arg.startswith("--in-place=")
+        for arg in args
+    )
+
+
+def _perl_in_place(args: tuple[str, ...]) -> bool:
+    return any(
+        arg == "-i"
+        or arg.startswith("-i")
+        or (arg.startswith("-") and not arg.startswith("--") and "i" in arg[1:])
+        for arg in args
+    )
+
+
 def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if not config.generated_paths:
         return False
@@ -1519,7 +1539,7 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
             for arg in invocation.args
             if not arg.startswith("-")
         )
-    if invocation.basename == "sed" and any(arg.startswith("-i") for arg in invocation.args):
+    if invocation.basename == "sed" and _sed_in_place(invocation.args):
         return any(
             _arg_targets_generated(
                 arg,
@@ -1529,7 +1549,7 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
             )
             for arg in invocation.args
         )
-    if invocation.basename == "perl" and any(arg.startswith("-pi") for arg in invocation.args):
+    if invocation.basename == "perl" and _perl_in_place(invocation.args):
         return any(
             _arg_targets_generated(
                 arg,
