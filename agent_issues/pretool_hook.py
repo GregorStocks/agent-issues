@@ -377,6 +377,7 @@ _GIT_GLOBAL_OPTS_WITH_ARG = {
 }
 
 _GIT_GLOBAL_OPTS_NO_ARG = {
+    "-p",
     "-P",
     "--bare",
     "--glob-pathspecs",
@@ -853,6 +854,8 @@ def _git_subcommand(invocation: Invocation) -> tuple[str, list[str]] | None:
 
 
 def _git_push_args(invocation: Invocation) -> list[str] | None:
+    if invocation.basename == "git-push":
+        return list(invocation.args)
     subcommand = _git_subcommand(invocation)
     if subcommand is None:
         return None
@@ -1059,7 +1062,17 @@ def _arg_targets_generated(
 def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if not config.generated_paths:
         return False
-    if invocation.basename in {"rm", "mv", "cp", "install", "touch", "truncate", "mkdir", "rmdir"}:
+    if invocation.basename in {
+        "rm",
+        "mv",
+        "cp",
+        "install",
+        "touch",
+        "truncate",
+        "mkdir",
+        "rmdir",
+        "ln",
+    }:
         return any(
             _arg_targets_generated(
                 arg,

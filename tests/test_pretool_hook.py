@@ -45,6 +45,21 @@ def test_blocks_raw_git_push() -> None:
     assert "agent-submit" in message
 
 
+def test_blocks_direct_git_push_helper() -> None:
+    assert "agent-submit" in (
+        rejection_message("git-push origin HEAD", _config(), dirty_generated_output=False)
+        or ""
+    )
+    assert "agent-submit" in (
+        rejection_message(
+            "/usr/lib/git-core/git-push --force origin HEAD",
+            _config(),
+            dirty_generated_output=False,
+        )
+        or ""
+    )
+
+
 def test_blocks_gh_pr_edit_and_gh_issue_with_flags() -> None:
     assert "agent-submit" in (
         rejection_message("gh -R owner/repo pr edit 12 --title T", _config()) or ""
@@ -406,6 +421,9 @@ def test_inline_git_aliases_are_inspected() -> None:
         rejection_message("git --no-pager -c alias.p='push origin HEAD' p", _config())
         or ""
     )
+    assert "agent-submit" in (
+        rejection_message("git -p -c alias.p='push origin HEAD' p", _config()) or ""
+    )
 
 
 def test_git_config_env_option_is_skipped_before_subcommand() -> None:
@@ -479,6 +497,15 @@ def test_blocks_tee_writes_to_generated_paths() -> None:
     )
     assert "generated output" in (
         rejection_message("tee -a data/generated/file.txt", _config()) or ""
+    )
+
+
+def test_blocks_link_writes_to_generated_paths() -> None:
+    assert "generated output" in (
+        rejection_message("ln -s ../source data/generated/link", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("ln -f source data/generated/file.txt", _config()) or ""
     )
 
 
