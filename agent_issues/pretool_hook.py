@@ -715,6 +715,16 @@ def _shell_c_payload(invocation: Invocation) -> str | None:
     return None
 
 
+def _shell_here_string_payload(invocation: Invocation) -> str | None:
+    if invocation.basename not in {"sh", "bash", "zsh", "dash"}:
+        return None
+    args = list(invocation.args)
+    for index, token in enumerate(args):
+        if token == "<<<" and index + 1 < len(args):
+            return args[index + 1]
+    return None
+
+
 def _env_split_payload(tokens: list[str]) -> tuple[str, str] | None:
     for index, token in enumerate(tokens):
         if os.path.basename(token) != "env":
@@ -802,6 +812,10 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
                 invocations.append(invocation)
             else:
                 invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            continue
+        payload = _shell_here_string_payload(invocation)
+        if payload is not None:
+            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
         invocations.append(invocation)
         if invocation.basename == "cd" and invocation.args:
@@ -1033,6 +1047,43 @@ _MAKE_OPTS_WITH_ARG = {
     "--assume-old",
     "--eval",
 }
+
+
+_POLICY_RELEVANT_COMMANDS = {
+    "__agent_issues_stdin_shell__",
+    "agent-submit",
+    "bash",
+    "cp",
+    "dash",
+    "eval",
+    "gh",
+    "git",
+    "git-push",
+    "install",
+    "ln",
+    "make",
+    "mkdir",
+    "mv",
+    "perl",
+    "rm",
+    "rmdir",
+    "sed",
+    "sh",
+    "tee",
+    "touch",
+    "truncate",
+    "zsh",
+}
+
+
+def _policy_relevant_invocation_has_expansion(invocation: Invocation) -> bool:
+    if "$" in invocation.executable:
+        return True
+    if invocation.basename not in _POLICY_RELEVANT_COMMANDS:
+        return False
+    return any("$" in arg for arg in invocation.args) or any(
+        "$" in target for target in invocation.redirection_targets
+    )
 
 
 def _make_targets(invocation: Invocation) -> list[str]:
@@ -1301,6 +1352,13 @@ def rejection_message(
             return (
                 "Do not pipe unresolved stdin into a shell; the hook cannot verify "
                 "the script that the shell will execute."
+            )
+
+        if _policy_relevant_invocation_has_expansion(invocation):
+            return (
+                "Do not use unresolved shell expansions in hook-checked command "
+                "names or policy-relevant arguments; the hook cannot verify the "
+                "command that Bash will execute."
             )
 
         trap_payload = _trap_payload(invocation)

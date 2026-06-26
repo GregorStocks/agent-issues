@@ -154,6 +154,22 @@ def test_blocks_stdin_fed_shells() -> None:
     )
 
 
+def test_recurses_into_shell_here_string_payload() -> None:
+    assert "agent-submit" in (
+        rejection_message("bash <<< 'git push origin HEAD'", _config()) or ""
+    )
+
+
+def test_blocks_unresolved_policy_relevant_expansions() -> None:
+    assert "unresolved shell expansions" in (
+        rejection_message("g=git; \"$g\" push origin HEAD", _config()) or ""
+    )
+    assert "unresolved shell expansions" in (
+        rejection_message("sub=push; git \"$sub\" origin HEAD", _config()) or ""
+    )
+    assert rejection_message("echo \"$HOME\"", _config()) is None
+
+
 def test_recurses_into_shell_c_option_clusters() -> None:
     assert "agent-submit" in (
         rejection_message("bash -lc 'git push origin HEAD'", _config()) or ""
