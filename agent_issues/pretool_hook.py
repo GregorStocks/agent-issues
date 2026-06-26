@@ -366,6 +366,43 @@ def _case_body_token_groups(tokens: list[str]) -> list[list[str]]:
     return groups
 
 
+_GIT_GLOBAL_OPTS_WITH_ARG = {
+    "-C",
+    "-c",
+    "--config-env",
+    "--exec-path",
+    "--git-dir",
+    "--namespace",
+    "--work-tree",
+}
+
+_GIT_GLOBAL_OPTS_NO_ARG = {
+    "-P",
+    "--bare",
+    "--glob-pathspecs",
+    "--icase-pathspecs",
+    "--literal-pathspecs",
+    "--no-pager",
+    "--no-replace-objects",
+    "--noglob-pathspecs",
+    "--paginate",
+}
+
+
+def _git_global_option_info(args: list[str], index: int) -> tuple[str, str | None, int] | None:
+    token = args[index]
+    if token in _GIT_GLOBAL_OPTS_WITH_ARG and index + 1 < len(args):
+        return token, args[index + 1], index + 2
+    for option in _GIT_GLOBAL_OPTS_WITH_ARG:
+        if token.startswith(f"{option}="):
+            return option, token.split("=", 1)[1], index + 1
+    if token.startswith("-c") and token != "-c":
+        return "-c", token[2:], index + 1
+    if token in _GIT_GLOBAL_OPTS_NO_ARG:
+        return token, None, index + 1
+    return None
+
+
 def _git_cwd(invocation: Invocation) -> str:
     if invocation.basename != "git":
         return invocation.cwd
@@ -373,12 +410,13 @@ def _git_cwd(invocation: Invocation) -> str:
     args = list(invocation.args)
     index = 0
     while index < len(args):
-        token = args[index]
-        if token == "-C" and index + 1 < len(args):
-            cwd = _clean_path(args[index + 1], cwd=cwd)
-            index += 2
-            continue
-        break
+        info = _git_global_option_info(args, index)
+        if info is None:
+            break
+        option, value, next_index = info
+        if option == "-C" and value is not None:
+            cwd = _clean_path(value, cwd=cwd)
+        index = next_index
     return cwd
 
 
@@ -387,30 +425,18 @@ def _git_option_aliases(invocation: Invocation) -> tuple[dict[str, str], int]:
     args = list(invocation.args)
     index = 0
     while index < len(args):
-        token = args[index]
-        config_value: str | None = None
-        if token == "-C" and index + 1 < len(args):
-            index += 2
-            continue
-        if token == "-c" and index + 1 < len(args):
-            config_value = args[index + 1]
-            index += 2
-        elif token.startswith("-c") and token != "-c":
-            config_value = token[2:]
-            index += 1
-        elif token == "--config-env" and index + 1 < len(args):
-            config_value = args[index + 1]
-            index += 2
-        elif token.startswith("--config-env="):
-            config_value = token.split("=", 1)[1]
-            index += 1
-        else:
+        info = _git_global_option_info(args, index)
+        if info is None:
             break
+        option, config_value, next_index = info
+        index = next_index
+        if option not in {"-c", "--config-env"}:
+            continue
 
         key, sep, value = config_value.partition("=") if config_value else ("", "", "")
         if not sep or not key.startswith("alias."):
             continue
-        if token == "--config-env" or token.startswith("--config-env="):
+        if option == "--config-env":
             value = invocation.env.get(value, "")
         aliases[key.removeprefix("alias.")] = value
     return aliases, index
@@ -788,25 +814,9 @@ def _git_subcommand(invocation: Invocation) -> tuple[str, list[str]] | None:
         if token == "--":
             index += 1
             break
-        if token in {
-            "-C",
-            "-c",
-            "--config-env",
-            "--git-dir",
-            "--work-tree",
-            "--namespace",
-        }:
-            index += 2
-            continue
-        if token.startswith("-c") and token != "-c":
-            index += 1
-            continue
-        if (
-            token.startswith("--config-env=")
-            or token.startswith("--git-dir=")
-            or token.startswith("--work-tree=")
-        ):
-            index += 1
+        info = _git_global_option_info(args, index)
+        if info is not None:
+            _option, _value, index = info
             continue
         if token.startswith("-"):
             index += 1
@@ -1069,6 +1079,8 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
             )
             for arg in pathspecs
         )
+    if name == "reset" and "--hard" in rest:
+        return True
     return name in {"checkout", "restore"} and any(
         _arg_targets_generated(
             arg,

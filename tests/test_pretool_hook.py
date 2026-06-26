@@ -354,6 +354,10 @@ def test_generated_path_matching_tracks_git_dash_c() -> None:
     assert "generated output" in (
         rejection_message("git -C data restore generated/file.txt", _config()) or ""
     )
+    assert "generated output" in (
+        rejection_message("git --no-pager -C data restore generated/file.txt", _config())
+        or ""
+    )
 
 
 def test_inline_git_aliases_are_inspected() -> None:
@@ -362,6 +366,10 @@ def test_inline_git_aliases_are_inspected() -> None:
     )
     assert "agent-submit" in (
         rejection_message("git -c alias.p='!git push origin HEAD' p", _config()) or ""
+    )
+    assert "agent-submit" in (
+        rejection_message("git --no-pager -c alias.p='push origin HEAD' p", _config())
+        or ""
     )
 
 
@@ -389,6 +397,12 @@ def test_git_alias_payload_preserves_cwd() -> None:
             _config(),
         )
         or ""
+    )
+
+
+def test_blocks_git_hard_reset_as_tree_mutation() -> None:
+    assert "generated output" in (
+        rejection_message("git reset --hard", _config()) or ""
     )
 
 
