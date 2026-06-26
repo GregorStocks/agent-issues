@@ -125,9 +125,21 @@ def _shell_tokens(command: str) -> list[str] | None:
     try:
         lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
-        return list(lexer)
+        tokens = list(lexer)
     except ValueError:
         return None
+    normalized: list[str] = []
+    compound_punctuation = {
+        ")&&": (")", "&&"),
+        ")||": (")", "||"),
+        ");": (")", ";"),
+    }
+    for token in tokens:
+        if token in compound_punctuation:
+            normalized.extend(compound_punctuation[token])
+        else:
+            normalized.append(token)
+    return normalized
 
 
 def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]:
@@ -149,6 +161,15 @@ def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]
 
 def _shell_segments(command: str) -> list[list[str]]:
     return [segment for segment, _separator in _shell_segments_with_separators(command)]
+
+
+def _segment_command(tokens: list[str]) -> str:
+    command = " ".join(tokens)
+    return (
+        command.replace("$ (", "$(")
+        .replace("< (", "<(")
+        .replace("> (", ">(")
+    )
 
 
 _HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_-]*)\1")
@@ -182,7 +203,11 @@ def _strip_heredocs(command: str) -> tuple[str, list[str]]:
             tokens.index("<<") if "<<" in tokens else len(tokens),
             tokens.index("<<-") if "<<-" in tokens else len(tokens),
         )
-        invocation = _unwrap_invocation(tokens[:heredoc_index])
+        segment_start = 0
+        for token_index, token in enumerate(tokens[:heredoc_index]):
+            if token in {"&&", "||", ";", "|", "&"}:
+                segment_start = token_index + 1
+        invocation = _unwrap_invocation(tokens[segment_start:heredoc_index])
         is_shell = invocation is not None and invocation.basename in {"sh", "bash", "zsh", "dash"}
         output.append(line)
         index += 1
@@ -808,12 +833,14 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
     previous_cwd = initial_cwd
     for body in shell_heredocs:
         invocations.extend(command_invocations(body, initial_cwd=cwd))
-    for body in _extract_subshells(command):
-        invocations.extend(command_invocations(body, initial_cwd=cwd))
-    for body in _extract_backticks(command):
-        invocations.extend(command_invocations(body, initial_cwd=cwd))
     invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
     for tokens, next_separator in _shell_segments_with_separators(command):
+        segment_command = _segment_command(tokens)
+        for body in _extract_subshells(segment_command):
+            invocations.extend(command_invocations(body, initial_cwd=cwd))
+        for body in _extract_backticks(segment_command):
+            invocations.extend(command_invocations(body, initial_cwd=cwd))
+
         function_body = _function_body_tokens(tokens)
         if function_body:
             invocations.extend(command_invocations(" ".join(function_body), initial_cwd=cwd))
@@ -874,7 +901,12 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             )
             continue
         invocations.append(invocation)
-        if invocation.basename == "cd" and invocation.args and next_separator != "||":
+        if (
+            invocation.basename == "cd"
+            and invocation.args
+            and "(" not in tokens
+            and next_separator != "||"
+        ):
             old_cwd = cwd
             if invocation.args[0] == "-":
                 cwd = previous_cwd

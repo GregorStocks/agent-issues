@@ -437,6 +437,18 @@ def test_generated_path_matching_tracks_cd_segments() -> None:
     )
 
 
+def test_substitution_uses_cwd_after_cd() -> None:
+    assert "generated output" in (
+        rejection_message("cd data && echo $(rm generated/file.txt)", _config()) or ""
+    )
+
+
+def test_subshell_cd_does_not_change_parent_cwd() -> None:
+    assert "generated output" in (
+        rejection_message("(cd data); rm data/generated/file.txt", _config()) or ""
+    )
+
+
 def test_generated_path_matching_resolves_cd_dash() -> None:
     assert "generated output" in (
         rejection_message(
@@ -651,6 +663,11 @@ def test_quoted_heredoc_expansions_are_literal() -> None:
 
 def test_shell_heredoc_body_is_parsed_as_command() -> None:
     command = "bash <<'EOF'\n" "git push origin HEAD\n" "EOF\n"
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
+
+
+def test_shell_heredoc_after_list_operator_is_parsed_as_command() -> None:
+    command = "true && bash <<'EOF'\n" "git push origin HEAD\n" "EOF\n"
     assert "agent-submit" in (rejection_message(command, _config()) or "")
 
 
