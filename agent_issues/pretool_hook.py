@@ -192,6 +192,7 @@ def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]
     separators = {"&&", "||", ";", "|", "&"}
     start = 0
     substitution_depth = 0
+    group_depth = 0
     previous = ""
     for index, token in enumerate([*tokens, ";"]):
         starts_substitution = (
@@ -199,10 +200,14 @@ def _shell_segments_with_separators(command: str) -> list[tuple[list[str], str]]
         ) or token.startswith("<(") or token.startswith(">(")
         if starts_substitution:
             substitution_depth += 1
+        elif token == "(":
+            group_depth += 1
         elif token == ")" and substitution_depth:
             substitution_depth -= 1
+        elif token == ")" and group_depth:
+            group_depth -= 1
 
-        if token in separators and substitution_depth == 0:
+        if token in separators and substitution_depth == 0 and group_depth == 0:
             segment = tokens[start:index]
             if segment:
                 segments.append((segment, token))
@@ -428,6 +433,56 @@ def _extract_backticks(command: str) -> list[str]:
                 bodies.append(command[body_start:cursor])
                 index = cursor + 1
                 break
+            cursor += 1
+        else:
+            index += 1
+    return bodies
+
+
+def _extract_parenthesized_groups(command: str) -> list[str]:
+    bodies: list[str] = []
+    in_single = False
+    in_double = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        previous = command[index - 1] if index > 0 else ""
+        if char == "\\" and index + 1 < len(command) and not in_single:
+            index += 2
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if (
+            char != "("
+            or in_single
+            or in_double
+            or previous in {"$", "<", ">"}
+        ):
+            index += 1
+            continue
+
+        body_start = index + 1
+        depth = 1
+        cursor = body_start
+        while cursor < len(command):
+            inner = command[cursor]
+            if inner == "\\" and cursor + 1 < len(command):
+                cursor += 2
+                continue
+            if inner == "(":
+                depth += 1
+            elif inner == ")":
+                depth -= 1
+                if depth == 0:
+                    bodies.append(command[body_start:cursor])
+                    index = cursor + 1
+                    break
             cursor += 1
         else:
             index += 1
@@ -1052,6 +1107,8 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             invocations.extend(command_invocations(body, initial_cwd=cwd))
         for body in _extract_backticks(segment_command):
             invocations.extend(command_invocations(body, initial_cwd=cwd))
+        for body in _extract_parenthesized_groups(segment_command):
+            invocations.extend(command_invocations(body, initial_cwd=cwd))
 
         function_body = _function_body_tokens(tokens)
         if function_body:
@@ -1554,7 +1611,6 @@ def _arg_targets_generated(
     include_ancestors: bool = False,
     cwd: str = ".",
 ) -> bool:
-    arg = arg.split("=", 1)[-1] if "=" in arg and not arg.startswith("-") else arg
     return any(
         _path_matches(arg, path, include_ancestors=include_ancestors, cwd=cwd)
         for path in paths

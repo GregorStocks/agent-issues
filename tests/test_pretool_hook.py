@@ -514,6 +514,18 @@ def test_generated_path_matching_collapses_dot_segments() -> None:
     )
 
 
+def test_generated_path_matching_keeps_equals_in_paths() -> None:
+    assert "generated output" in (
+        rejection_message("rm data/generated/foo=bar", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("git restore data/generated/foo=bar", _config()) or ""
+    )
+    assert "redirect shell output" in (
+        rejection_message("printf x > data/generated/foo=bar", _config()) or ""
+    )
+
+
 def test_generated_path_matching_tracks_cd_segments() -> None:
     assert "generated output" in (
         rejection_message("cd data && rm generated/file.txt", _config()) or ""
@@ -543,6 +555,12 @@ def test_substitution_uses_cwd_after_cd() -> None:
 def test_subshell_cd_does_not_change_parent_cwd() -> None:
     assert "generated output" in (
         rejection_message("(cd data); rm data/generated/file.txt", _config()) or ""
+    )
+
+
+def test_subshell_cd_changes_subshell_cwd() -> None:
+    assert "generated output" in (
+        rejection_message("(cd data && rm generated/file.txt)", _config()) or ""
     )
 
 
