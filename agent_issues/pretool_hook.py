@@ -433,6 +433,33 @@ def _git_inline_alias_payload(invocation: Invocation) -> str | None:
     return f"git {alias} {rest}".strip()
 
 
+def _trap_payload(invocation: Invocation) -> str | None:
+    if invocation.basename != "trap":
+        return None
+    args = list(invocation.args)
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            index += 1
+            break
+        if token in {"-l", "-p"}:
+            index += 1
+            continue
+        if token.startswith("-") and token != "-":
+            index += 1
+            continue
+        break
+    if index >= len(args):
+        return None
+    payload = args[index]
+    if payload == "-":
+        return None
+    if len(args) == index + 1 and payload.upper() in {"0", "EXIT"}:
+        return None
+    return payload
+
+
 _SHELL_CONTROL_KEYWORDS = {
     "!",
     "(",
@@ -641,29 +668,29 @@ def _env_split_payload(tokens: list[str]) -> str | None:
     return None
 
 
-def command_invocations(command: str) -> list[Invocation]:
+def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocation]:
     """Return executable invocations, following common transparent wrappers."""
 
     command, shell_heredocs = _strip_heredocs(command)
     invocations: list[Invocation] = []
-    cwd = "."
+    cwd = initial_cwd
     for body in shell_heredocs:
-        invocations.extend(command_invocations(body))
+        invocations.extend(command_invocations(body, initial_cwd=cwd))
     for body in _extract_subshells(command):
-        invocations.extend(command_invocations(body))
+        invocations.extend(command_invocations(body, initial_cwd=cwd))
     for body in _extract_backticks(command):
-        invocations.extend(command_invocations(body))
+        invocations.extend(command_invocations(body, initial_cwd=cwd))
     for tokens in _shell_segments(command):
         function_body = _function_body_tokens(tokens)
         if function_body:
-            invocations.extend(command_invocations(" ".join(function_body)))
+            invocations.extend(command_invocations(" ".join(function_body), initial_cwd=cwd))
 
         for case_body in _case_body_token_groups(tokens):
-            invocations.extend(command_invocations(" ".join(case_body)))
+            invocations.extend(command_invocations(" ".join(case_body), initial_cwd=cwd))
 
         env_payload = _env_split_payload(tokens)
         if env_payload:
-            invocations.extend(command_invocations(env_payload))
+            invocations.extend(command_invocations(env_payload, initial_cwd=cwd))
 
         invocation = _unwrap_invocation(tokens)
         if invocation is None:
@@ -682,12 +709,14 @@ def command_invocations(command: str) -> list[Invocation]:
         invocation_cwd = _clean_path(invocation.cwd, cwd=cwd)
         invocation = replace(invocation, cwd=invocation_cwd)
         if invocation.basename == "eval" and invocation.args:
-            invocations.extend(command_invocations(" ".join(invocation.args)))
+            invocations.extend(
+                command_invocations(" ".join(invocation.args), initial_cwd=invocation.cwd)
+            )
             continue
 
         payload = _shell_c_payload(invocation)
         if payload is not None:
-            invocations.extend(command_invocations(payload))
+            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
         invocations.append(invocation)
         if invocation.basename == "cd" and invocation.args:
@@ -1099,11 +1128,12 @@ def rejection_message(
     *,
     timeout_ms: int | None = None,
     dirty_generated_output: bool | None = None,
+    cwd: str = ".",
 ) -> str | None:
     """Return a user-facing rejection message, or ``None`` to allow."""
 
     config = config or HookConfig()
-    invocations = command_invocations(command)
+    invocations = command_invocations(command, initial_cwd=cwd)
     if dirty_generated_output is None and any(_git_push_args(inv) is not None for inv in invocations):
         dirty_generated_output = _has_dirty_generated_output(config.generated_paths)
     dirty_generated_output = bool(dirty_generated_output)
@@ -1115,6 +1145,18 @@ def rejection_message(
                 "Only kill processes by specific PID after verifying the PID."
             )
 
+        trap_payload = _trap_payload(invocation)
+        if trap_payload is not None:
+            trap_message = rejection_message(
+                trap_payload,
+                config,
+                timeout_ms=timeout_ms,
+                dirty_generated_output=dirty_generated_output,
+                cwd=invocation.cwd,
+            )
+            if trap_message is not None:
+                return trap_message
+
         alias_payload = _git_inline_alias_payload(invocation)
         if alias_payload is not None:
             alias_message = rejection_message(
@@ -1122,6 +1164,7 @@ def rejection_message(
                 config,
                 timeout_ms=timeout_ms,
                 dirty_generated_output=dirty_generated_output,
+                cwd=invocation.cwd,
             )
             if alias_message is not None:
                 return alias_message

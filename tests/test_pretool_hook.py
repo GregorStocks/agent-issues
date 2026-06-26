@@ -212,6 +212,13 @@ def test_inspects_legacy_backtick_substitutions() -> None:
     assert "pkill/killall" in (rejection_message("echo `pkill python`", _config()) or "")
 
 
+def test_inspects_trap_handlers() -> None:
+    assert "agent-submit" in (
+        rejection_message("trap 'git push origin HEAD' EXIT", _config()) or ""
+    )
+    assert "pkill/killall" in (rejection_message("trap 'pkill python' 0", _config()) or "")
+
+
 def test_inspects_shell_function_bodies() -> None:
     assert "agent-submit" in (
         rejection_message("f(){ git push origin HEAD; }; f", _config()) or ""
@@ -369,6 +376,16 @@ def test_git_config_env_aliases_are_inspected() -> None:
     assert "agent-submit" in (
         rejection_message(
             "GITALIAS='push origin HEAD' git --config-env=alias.p=GITALIAS p",
+            _config(),
+        )
+        or ""
+    )
+
+
+def test_git_alias_payload_preserves_cwd() -> None:
+    assert "generated output" in (
+        rejection_message(
+            "cd data && git -c alias.r='restore generated/file.txt' r",
             _config(),
         )
         or ""
