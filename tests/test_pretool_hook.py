@@ -363,9 +363,25 @@ def test_generated_path_matching_tracks_cd_segments() -> None:
     )
 
 
+def test_generated_path_matching_resolves_cd_dash() -> None:
+    assert "generated output" in (
+        rejection_message(
+            "cd data && cd - && rm data/generated/file.txt",
+            _config(),
+        )
+        or ""
+    )
+
+
 def test_generated_path_matching_tracks_env_chdir() -> None:
     assert "generated output" in (
         rejection_message("env -C data rm generated/file.txt", _config()) or ""
+    )
+
+
+def test_generated_path_matching_tracks_env_chdir_with_split_string() -> None:
+    assert "generated output" in (
+        rejection_message("env -C data -S 'rm generated/file.txt'", _config()) or ""
     )
 
 
@@ -451,10 +467,32 @@ def test_blocks_git_rm_and_mv_generated_paths() -> None:
     )
 
 
+def test_blocks_git_top_level_pathspec_generated_paths() -> None:
+    assert "generated output" in (
+        rejection_message("git restore :/data/generated/file.txt", _config()) or ""
+    )
+
+
+def test_blocks_tee_writes_to_generated_paths() -> None:
+    assert "generated output" in (
+        rejection_message("printf x | tee data/generated/file.txt", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("tee -a data/generated/file.txt", _config()) or ""
+    )
+
+
 def test_binary_block_matching_handles_absolute_paths() -> None:
     binary = Path.cwd() / "target/debug/project-cli"
     assert (
         rejection_message(str(binary), _config())
+        == "Do not run project-cli directly. Use make test."
+    )
+
+
+def test_binary_block_matching_uses_invocation_cwd() -> None:
+    assert (
+        rejection_message("cd target/debug && ./project-cli --help", _config())
         == "Do not run project-cli directly. Use make test."
     )
 

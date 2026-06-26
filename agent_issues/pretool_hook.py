@@ -680,21 +680,31 @@ def _shell_c_payload(invocation: Invocation) -> str | None:
     return None
 
 
-def _env_split_payload(tokens: list[str]) -> str | None:
+def _env_split_payload(tokens: list[str]) -> tuple[str, str] | None:
     for index, token in enumerate(tokens):
         if os.path.basename(token) != "env":
             continue
         rest = tokens[index + 1 :]
+        payload_cwd = "."
         for arg_index, arg in enumerate(rest):
+            if arg in {"-C", "--chdir"} and arg_index + 1 < len(rest):
+                payload_cwd = _clean_path(rest[arg_index + 1], cwd=payload_cwd)
+                continue
+            if arg.startswith("--chdir="):
+                payload_cwd = _clean_path(arg.split("=", 1)[1], cwd=payload_cwd)
+                continue
+            if arg.startswith("-C") and len(arg) > 2:
+                payload_cwd = _clean_path(arg[2:], cwd=payload_cwd)
+                continue
             if arg in {"-S", "--split-string"} and arg_index + 1 < len(rest):
                 trailing = " ".join(shlex.quote(part) for part in rest[arg_index + 2 :])
-                return f"{rest[arg_index + 1]} {trailing}".strip()
+                return f"{rest[arg_index + 1]} {trailing}".strip(), payload_cwd
             if arg.startswith("-S") and len(arg) > 2:
                 trailing = " ".join(shlex.quote(part) for part in rest[arg_index + 1 :])
-                return f"{arg[2:]} {trailing}".strip()
+                return f"{arg[2:]} {trailing}".strip(), payload_cwd
             if arg.startswith("--split-string="):
                 trailing = " ".join(shlex.quote(part) for part in rest[arg_index + 1 :])
-                return f"{arg.split('=', 1)[1]} {trailing}".strip()
+                return f"{arg.split('=', 1)[1]} {trailing}".strip(), payload_cwd
     return None
 
 
@@ -704,6 +714,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
     command, shell_heredocs = _strip_heredocs(command)
     invocations: list[Invocation] = []
     cwd = initial_cwd
+    previous_cwd = initial_cwd
     for body in shell_heredocs:
         invocations.extend(command_invocations(body, initial_cwd=cwd))
     for body in _extract_subshells(command):
@@ -720,7 +731,10 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
 
         env_payload = _env_split_payload(tokens)
         if env_payload:
-            invocations.extend(command_invocations(env_payload, initial_cwd=cwd))
+            payload, payload_cwd = env_payload
+            invocations.extend(
+                command_invocations(payload, initial_cwd=_clean_path(payload_cwd, cwd=cwd))
+            )
 
         invocation = _unwrap_invocation(tokens)
         if invocation is None:
@@ -752,7 +766,12 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
             continue
         invocations.append(invocation)
         if invocation.basename == "cd" and invocation.args:
-            cwd = _clean_path(invocation.args[0], cwd=cwd)
+            old_cwd = cwd
+            if invocation.args[0] == "-":
+                cwd = previous_cwd
+            else:
+                cwd = _clean_path(invocation.args[0], cwd=cwd)
+            previous_cwd = old_cwd
     return invocations
 
 
@@ -979,6 +998,7 @@ def _make_targets(invocation: Invocation) -> list[str]:
 
 def _clean_path(path: str, *, cwd: str = ".") -> str:
     path = path.removeprefix(":(top)")
+    path = path.removeprefix(":/")
     path = path.removeprefix("./")
     path_obj = Path(path)
     if path_obj.is_absolute():
@@ -1017,8 +1037,8 @@ def _path_matches(
     return False
 
 
-def _binary_matches(executable: str, basename: str, pattern: str) -> bool:
-    normalized = _clean_path(executable)
+def _binary_matches(executable: str, basename: str, pattern: str, *, cwd: str = ".") -> bool:
+    normalized = _clean_path(executable, cwd=cwd)
     return fnmatch.fnmatch(normalized, pattern) or fnmatch.fnmatch(basename, pattern)
 
 
@@ -1048,6 +1068,12 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
                 cwd=invocation.cwd,
             )
             for arg in invocation.args
+        )
+    if invocation.basename == "tee":
+        return any(
+            _arg_targets_generated(arg, config.generated_paths, cwd=invocation.cwd)
+            for arg in invocation.args
+            if not arg.startswith("-")
         )
     if invocation.basename == "sed" and any(arg.startswith("-i") for arg in invocation.args):
         return any(
@@ -1281,7 +1307,12 @@ def rejection_message(
             return block.message
 
         for block in config.binary_blocks:
-            if _binary_matches(invocation.executable, invocation.basename, block.pattern):
+            if _binary_matches(
+                invocation.executable,
+                invocation.basename,
+                block.pattern,
+                cwd=invocation.cwd,
+            ):
                 return block.message
 
     return None
