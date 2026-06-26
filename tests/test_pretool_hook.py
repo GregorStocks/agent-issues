@@ -219,6 +219,12 @@ def test_inspects_trap_handlers() -> None:
     assert "pkill/killall" in (rejection_message("trap 'pkill python' 0", _config()) or "")
 
 
+def test_eval_with_unresolved_expansion_is_blocked() -> None:
+    assert "eval with unresolved shell expansions" in (
+        rejection_message("cmd='git push origin HEAD'; eval \"$cmd\"", _config()) or ""
+    )
+
+
 def test_inspects_shell_function_bodies() -> None:
     assert "agent-submit" in (
         rejection_message("f(){ git push origin HEAD; }; f", _config()) or ""
@@ -250,6 +256,12 @@ def test_git_switch_guess_does_not_hide_branch_target() -> None:
 def test_git_detach_requires_signoff() -> None:
     assert "PROJECT_BRANCH_SWITCH_SIGNOFF=HEAD" in (
         rejection_message("git switch --detach", _config()) or ""
+    )
+
+
+def test_git_switch_orphan_requires_signoff() -> None:
+    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=newbranch" in (
+        rejection_message("git switch --orphan=newbranch", _config()) or ""
     )
 
 
@@ -403,6 +415,15 @@ def test_git_alias_payload_preserves_cwd() -> None:
 def test_blocks_git_hard_reset_as_tree_mutation() -> None:
     assert "generated output" in (
         rejection_message("git reset --hard", _config()) or ""
+    )
+
+
+def test_blocks_git_rm_and_mv_generated_paths() -> None:
+    assert "generated output" in (
+        rejection_message("git rm data/generated/file.txt", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("git mv data/generated/file.txt elsewhere", _config()) or ""
     )
 
 

@@ -735,9 +735,11 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         invocation_cwd = _clean_path(invocation.cwd, cwd=cwd)
         invocation = replace(invocation, cwd=invocation_cwd)
         if invocation.basename == "eval" and invocation.args:
-            invocations.extend(
-                command_invocations(" ".join(invocation.args), initial_cwd=invocation.cwd)
-            )
+            payload = " ".join(invocation.args)
+            if "$" in payload:
+                invocations.append(invocation)
+            else:
+                invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
             continue
 
         payload = _shell_c_payload(invocation)
@@ -848,7 +850,7 @@ def _push_uses_force(args: list[str]) -> bool:
     return False
 
 
-_SWITCH_OPTS_WITH_ARG = {"-c", "-C", "--create", "--force-create"}
+_SWITCH_OPTS_WITH_ARG = {"-c", "-C", "--create", "--force-create", "--orphan"}
 _CHECKOUT_OPTS_WITH_ARG = {"-b", "-B", "--orphan", "--pathspec-from-file"}
 
 
@@ -862,9 +864,11 @@ def _branch_target(args: list[str], opts_with_arg: set[str], *, checkout: bool) 
             return None if checkout else (args[index + 1] if index + 1 < len(args) else None)
         if token in {"-d", "--detach"}:
             return args[index + 1] if index + 1 < len(args) else "HEAD"
-        if token.startswith("--create=") or token.startswith("--force-create="):
-            return token.split("=", 1)[1]
-        if checkout and token.startswith("--orphan="):
+        if (
+            token.startswith("--create=")
+            or token.startswith("--force-create=")
+            or token.startswith("--orphan=")
+        ):
             return token.split("=", 1)[1]
         if token.startswith(("-b", "-B")) and token not in {"-b", "-B"}:
             return token[2:]
@@ -1081,6 +1085,16 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
         )
     if name == "reset" and "--hard" in rest:
         return True
+    if name in {"rm", "mv"}:
+        return any(
+            _arg_targets_generated(
+                arg,
+                config.generated_paths,
+                include_ancestors=True,
+                cwd=git_cwd,
+            )
+            for arg in rest
+        )
     return name in {"checkout", "restore"} and any(
         _arg_targets_generated(
             arg,
@@ -1155,6 +1169,12 @@ def rejection_message(
             return (
                 "Do not use pkill/killall; other agents may share this machine. "
                 "Only kill processes by specific PID after verifying the PID."
+            )
+
+        if invocation.basename == "eval" and any("$" in arg for arg in invocation.args):
+            return (
+                "Do not use eval with unresolved shell expansions; the hook cannot "
+                "verify the command that eval will execute."
             )
 
         trap_payload = _trap_payload(invocation)
