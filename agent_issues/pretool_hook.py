@@ -1272,7 +1272,9 @@ def _writer_arg_targets_generated(
     include_ancestors: bool = False,
 ) -> bool:
     target_directory_commands = {"cp", "install", "ln", "mv"}
+    destination_only_commands = {"cp", "install", "ln"}
     args = list(invocation.args)
+    operands: list[str] = []
     index = 0
     while index < len(args):
         arg = args[index]
@@ -1307,6 +1309,16 @@ def _writer_arg_targets_generated(
                     return True
                 index += 1
                 continue
+        if invocation.basename in destination_only_commands:
+            if arg == "--":
+                operands.extend(args[index + 1 :])
+                break
+            if arg.startswith("-"):
+                index += 1
+                continue
+            operands.append(arg)
+            index += 1
+            continue
         if _arg_targets_generated(
             arg,
             paths,
@@ -1315,6 +1327,13 @@ def _writer_arg_targets_generated(
         ):
             return True
         index += 1
+    if invocation.basename in destination_only_commands and operands:
+        return _arg_targets_generated(
+            operands[-1],
+            paths,
+            include_ancestors=include_ancestors,
+            cwd=invocation.cwd,
+        )
     return False
 
 
@@ -1395,6 +1414,8 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
     if name == "checkout" and _pathless_forced_checkout(rest):
         return True
     if name in {"checkout", "restore"} and _git_uses_pathspec_from_file(rest):
+        return True
+    if name == "apply":
         return True
     if name in {"rm", "mv"}:
         return any(

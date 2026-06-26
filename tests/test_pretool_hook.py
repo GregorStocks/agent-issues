@@ -586,6 +586,16 @@ def test_blocks_git_pathspec_from_file_generated_restores() -> None:
     )
 
 
+def test_blocks_git_apply_when_generated_paths_are_configured() -> None:
+    assert "generated output" in (
+        rejection_message(
+            "git apply --include=data/generated/file.txt /tmp/patch.diff",
+            _config(),
+        )
+        or ""
+    )
+
+
 def test_blocks_tee_writes_to_generated_paths() -> None:
     assert "generated output" in (
         rejection_message("printf x | tee data/generated/file.txt", _config()) or ""
@@ -611,6 +621,21 @@ def test_blocks_target_directory_writes_to_generated_paths() -> None:
     )
     assert "generated output" in (
         rejection_message("install -t data/generated source.txt", _config()) or ""
+    )
+
+
+def test_allows_copy_and_link_reads_from_generated_paths() -> None:
+    assert (
+        rejection_message("cp data/generated/file.txt /tmp/file.txt", _config())
+        is None
+    )
+    assert (
+        rejection_message("install data/generated/file.txt /tmp/file.txt", _config())
+        is None
+    )
+    assert (
+        rejection_message("ln data/generated/file.txt /tmp/link.txt", _config())
+        is None
     )
 
 
