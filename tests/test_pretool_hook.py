@@ -152,6 +152,9 @@ def test_blocks_stdin_fed_shells() -> None:
     assert "pipe unresolved stdin into a shell" in (
         rejection_message("printf 'git push origin HEAD\\n' | sh", _config()) or ""
     )
+    assert "pipe unresolved stdin into a shell" in (
+        rejection_message("sh < <(printf 'git push origin HEAD\\n')", _config()) or ""
+    )
 
 
 def test_recurses_into_shell_here_string_payload() -> None:
@@ -166,6 +169,9 @@ def test_blocks_unresolved_policy_relevant_expansions() -> None:
     )
     assert "unresolved shell expansions" in (
         rejection_message("sub=push; git \"$sub\" origin HEAD", _config()) or ""
+    )
+    assert "unresolved shell expansions" in (
+        rejection_message("`printf git` push origin HEAD", _config()) or ""
     )
     assert rejection_message("echo \"$HOME\"", _config()) is None
 
@@ -378,6 +384,15 @@ def test_blocks_pathless_forced_checkout_as_tree_mutation() -> None:
         rejection_message("git checkout --force", _config()) or ""
     )
     assert rejection_message("git checkout -f -- file.txt", _config()) is None
+
+
+def test_blocks_worktree_reset_modes_as_tree_mutations() -> None:
+    assert "generated output" in (
+        rejection_message("git reset --merge HEAD~1", _config()) or ""
+    )
+    assert "generated output" in (
+        rejection_message("git reset --keep HEAD~1", _config()) or ""
+    )
 
 
 def test_blocks_pathless_git_clean_as_tree_mutation() -> None:

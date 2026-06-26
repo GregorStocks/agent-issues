@@ -759,6 +759,18 @@ def _shell_here_string_payload(invocation: Invocation) -> str | None:
     return None
 
 
+def _shell_process_substitution_stdin(invocation: Invocation) -> bool:
+    if invocation.basename not in {"sh", "bash", "zsh", "dash"}:
+        return False
+    args = list(invocation.args)
+    return any(
+        arg == "<"
+        and index + 1 < len(args)
+        and args[index + 1].startswith("<(")
+        for index, arg in enumerate(args)
+    )
+
+
 def _env_split_payload(tokens: list[str]) -> tuple[str, str] | None:
     for index, token in enumerate(tokens):
         if os.path.basename(token) != "env":
@@ -834,7 +846,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         invocation = replace(invocation, cwd=invocation_cwd)
         if invocation.basename == "eval" and invocation.args:
             payload = " ".join(invocation.args)
-            if "$" in payload:
+            if _has_unresolved_shell_expansion(payload):
                 invocations.append(invocation)
             else:
                 invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
@@ -842,7 +854,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
 
         payload = _shell_c_payload(invocation)
         if payload is not None:
-            if "$" in payload:
+            if _has_unresolved_shell_expansion(payload):
                 invocations.append(invocation)
             else:
                 invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
@@ -850,6 +862,16 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         payload = _shell_here_string_payload(invocation)
         if payload is not None:
             invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            continue
+        if _shell_process_substitution_stdin(invocation):
+            invocations.append(
+                Invocation(
+                    env=invocation.env,
+                    executable="__agent_issues_stdin_shell__",
+                    args=invocation.args,
+                    cwd=invocation.cwd,
+                )
+            )
             continue
         invocations.append(invocation)
         if invocation.basename == "cd" and invocation.args and next_separator != "||":
@@ -1110,13 +1132,18 @@ _POLICY_RELEVANT_COMMANDS = {
 }
 
 
+def _has_unresolved_shell_expansion(value: str) -> bool:
+    return "$" in value or "`" in value
+
+
 def _policy_relevant_invocation_has_expansion(invocation: Invocation) -> bool:
-    if "$" in invocation.executable:
+    if _has_unresolved_shell_expansion(invocation.executable):
         return True
     if invocation.basename not in _POLICY_RELEVANT_COMMANDS:
         return False
-    return any("$" in arg for arg in invocation.args) or any(
-        "$" in target for target in invocation.redirection_targets
+    return any(_has_unresolved_shell_expansion(arg) for arg in invocation.args) or any(
+        _has_unresolved_shell_expansion(target)
+        for target in invocation.redirection_targets
     )
 
 
@@ -1329,7 +1356,9 @@ def _generated_mutation(invocation: Invocation, config: HookConfig) -> bool:
             )
             for arg in pathspecs
         )
-    if name == "reset" and "--hard" in rest:
+    if name == "reset" and any(
+        arg in {"--hard", "--merge", "--keep"} for arg in rest
+    ):
         return True
     if name == "checkout" and _pathless_forced_checkout(rest):
         return True
@@ -1427,14 +1456,16 @@ def rejection_message(
                 "aliases can hide commands from static policy checks."
             )
 
-        if invocation.basename == "eval" and any("$" in arg for arg in invocation.args):
+        if invocation.basename == "eval" and any(
+            _has_unresolved_shell_expansion(arg) for arg in invocation.args
+        ):
             return (
                 "Do not use eval with unresolved shell expansions; the hook cannot "
                 "verify the command that eval will execute."
             )
 
         shell_payload = _shell_c_payload(invocation)
-        if shell_payload is not None and "$" in shell_payload:
+        if shell_payload is not None and _has_unresolved_shell_expansion(shell_payload):
             return (
                 "Do not use shell -c with unresolved shell expansions; the hook "
                 "cannot verify the command that the nested shell will execute."
@@ -1512,7 +1543,10 @@ def rejection_message(
                 )
 
         if config.generated_paths:
-            if any("$" in target for target in invocation.redirection_targets):
+            if any(
+                _has_unresolved_shell_expansion(target)
+                for target in invocation.redirection_targets
+            ):
                 return (
                     "Do not redirect shell output to unresolved shell expansion targets; "
                     "the hook cannot verify the file that Bash will open."
