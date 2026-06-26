@@ -234,6 +234,9 @@ def test_blocks_unresolved_policy_relevant_expansions() -> None:
     assert "unresolved shell expansions" in (
         rejection_message("g{i..i}t p{u..u}sh origin HEAD", _config()) or ""
     )
+    assert "unresolved shell expansions" in (
+        rejection_message("d=data; cd \"$d\" && rm generated/file.txt", _config()) or ""
+    )
     assert rejection_message("echo \"$HOME\"", _config()) is None
 
 
@@ -755,6 +758,9 @@ def test_blocks_target_directory_writes_to_generated_paths() -> None:
         rejection_message("install source.txt data/generated/file.txt -m 755", _config())
         or ""
     )
+    assert "generated output" in (
+        rejection_message("install -d data/generated /tmp/ok", _config()) or ""
+    )
 
 
 def test_allows_copy_and_link_reads_from_generated_paths() -> None:
@@ -797,6 +803,16 @@ def test_binary_block_matching_uses_invocation_cwd() -> None:
 def test_heredoc_literal_body_is_not_parsed_as_command() -> None:
     command = "cat <<'EOF' > /tmp/message\n" "git push origin HEAD\n" "EOF\n"
     assert rejection_message(command, _config()) is None
+
+
+def test_heredoc_delimiter_uses_full_token() -> None:
+    command = (
+        "cat <<EOF.txt >/tmp/message\n"
+        "hello\n"
+        "EOF.txt\n"
+        "git push origin HEAD\n"
+    )
+    assert "agent-submit" in (rejection_message(command, _config()) or "")
 
 
 def test_quoted_heredoc_marker_does_not_hide_following_command() -> None:

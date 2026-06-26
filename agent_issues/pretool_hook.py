@@ -221,7 +221,7 @@ def _segment_command(tokens: list[str]) -> str:
     )
 
 
-_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_-]*)\1")
+_HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([^\s'\";|&<>]+)\1")
 
 
 def _heredoc_specs(command_line: str) -> list[tuple[str, bool]]:
@@ -1347,6 +1347,7 @@ _POLICY_RELEVANT_COMMANDS = {
     "__agent_issues_stdin_shell__",
     "agent-submit",
     "bash",
+    "cd",
     "cp",
     "dash",
     "eval",
@@ -1503,6 +1504,9 @@ def _writer_arg_targets_generated(
     }
     args = list(invocation.args)
     operands: list[str] = []
+    install_directory_mode = invocation.basename == "install" and any(
+        arg in {"-d", "--directory"} for arg in args
+    )
     index = 0
     while index < len(args):
         arg = args[index]
@@ -1541,6 +1545,9 @@ def _writer_arg_targets_generated(
             if arg == "--":
                 operands.extend(args[index + 1 :])
                 break
+            if invocation.basename == "install" and arg in {"-d", "--directory"}:
+                index += 1
+                continue
             option_name = arg.split("=", 1)[0]
             if (
                 option_name in destination_option_args[invocation.basename]
@@ -1573,6 +1580,16 @@ def _writer_arg_targets_generated(
         ):
             return True
         index += 1
+    if install_directory_mode:
+        return any(
+            _arg_targets_generated(
+                operand,
+                paths,
+                include_ancestors=include_ancestors,
+                cwd=invocation.cwd,
+            )
+            for operand in operands
+        )
     if invocation.basename in destination_only_commands and operands:
         return _arg_targets_generated(
             operands[-1],
