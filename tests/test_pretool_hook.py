@@ -49,6 +49,9 @@ def test_comment_newline_does_not_hide_following_command() -> None:
     assert "agent-submit" in (
         rejection_message("echo ok # comment\ngit push origin HEAD", _config()) or ""
     )
+    assert "agent-submit" in (
+        rejection_message("echo ok#; git push origin HEAD", _config()) or ""
+    )
 
 
 def test_blocks_direct_git_push_helper() -> None:
@@ -195,6 +198,16 @@ def test_blocks_stdin_fed_shells() -> None:
     )
     assert "pipe unresolved stdin into a shell" in (
         rejection_message("sh < <(printf 'git push origin HEAD\\n')", _config()) or ""
+    )
+
+
+def test_blocks_leading_stdin_fed_shells() -> None:
+    assert "agent-submit" in (
+        rejection_message("<<< 'git push origin HEAD' bash", _config()) or ""
+    )
+    assert "pipe unresolved stdin into a shell" in (
+        rejection_message("<<EOF bash\n" "git push origin HEAD\n" "EOF\n", _config())
+        or ""
     )
 
 
@@ -647,8 +660,19 @@ def test_git_counted_env_aliases_are_inspected() -> None:
     )
 
 
+def test_exported_git_counted_env_aliases_are_inspected() -> None:
+    assert "agent-submit" in (
+        rejection_message(
+            "export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.p "
+            "GIT_CONFIG_VALUE_0='push origin HEAD'; git p",
+            _config(),
+        )
+        or ""
+    )
+
+
 def test_unresolved_git_config_env_alias_is_blocked() -> None:
-    assert "eval with unresolved shell expansions" in (
+    assert "agent-submit" in (
         rejection_message(
             "export GITALIAS='push origin HEAD'; git --config-env=alias.p=GITALIAS p",
             _config(),

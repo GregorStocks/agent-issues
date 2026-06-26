@@ -126,6 +126,7 @@ def _shell_tokens(command: str) -> list[str] | None:
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
+        lexer.commenters = ""
         tokens = list(lexer)
     except ValueError:
         return None
@@ -164,7 +165,9 @@ def _normalize_shell_newlines(command: str) -> str:
             output.append(char)
             index += 1
             continue
-        if char == "#" and not in_single and not in_double:
+        previous = output[-1][-1] if output else ""
+        starts_comment = not previous or previous.isspace() or previous in ";|&("
+        if char == "#" and not in_single and not in_double and starts_comment:
             while index < len(command) and command[index] != "\n":
                 index += 1
             if index < len(command):
@@ -896,6 +899,32 @@ def _shell_process_substitution_stdin(invocation: Invocation) -> bool:
     )
 
 
+def _leading_shell_here_string_payload(
+    tokens: list[str], invocation: Invocation
+) -> str | None:
+    if invocation.basename not in {"sh", "bash", "zsh", "dash"}:
+        return None
+    for index, token in enumerate(tokens):
+        if os.path.basename(token) == invocation.basename:
+            break
+        if token == "<<<" and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return None
+
+
+def _leading_shell_stdin_redirection(tokens: list[str], invocation: Invocation) -> bool:
+    if invocation.basename not in {"sh", "bash", "zsh", "dash"}:
+        return False
+    for index, token in enumerate(tokens):
+        if os.path.basename(token) == invocation.basename:
+            return False
+        if token in {"<<", "<<-"}:
+            return True
+        if token == "<" and index + 1 < len(tokens) and tokens[index + 1].startswith("<("):
+            return True
+    return False
+
+
 def _env_split_payload(tokens: list[str]) -> tuple[str, str] | None:
     for index, token in enumerate(tokens):
         if os.path.basename(token) != "env":
@@ -1007,6 +1036,7 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
         invocations.extend(command_invocations(body, initial_cwd=cwd))
     invocations.extend(_stdin_shell_pipeline_invocations(command, cwd=cwd))
     pending_or_cwd: tuple[str, str] | None = None
+    exported_env: dict[str, str] = {}
     for tokens, next_separator in _shell_segments_with_separators(command):
         segment_command = _segment_command(tokens)
         for body in _extract_subshells(segment_command):
@@ -1043,7 +1073,18 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
                 )
             continue
         invocation_cwd = _clean_path(invocation.cwd, cwd=cwd)
-        invocation = replace(invocation, cwd=invocation_cwd)
+        invocation = replace(
+            invocation,
+            cwd=invocation_cwd,
+            env={**exported_env, **invocation.env},
+        )
+        if invocation.basename == "export":
+            for arg in invocation.args:
+                if _is_env_assignment(arg):
+                    key, value = arg.split("=", 1)
+                    exported_env[key] = value
+            invocations.append(invocation)
+            continue
         if invocation.basename == "eval" and invocation.args:
             payload = " ".join(invocation.args)
             if _has_unresolved_shell_expansion(payload):
@@ -1060,6 +1101,20 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
                 invocations.append(invocation)
             else:
                 invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            continue
+        payload = _leading_shell_here_string_payload(tokens, invocation)
+        if payload is not None:
+            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            continue
+        if _leading_shell_stdin_redirection(tokens, invocation):
+            invocations.append(
+                Invocation(
+                    env=invocation.env,
+                    executable="__agent_issues_stdin_shell__",
+                    args=invocation.args,
+                    cwd=invocation.cwd,
+                )
+            )
             continue
         payload = _shell_here_string_payload(invocation)
         if payload is not None:
