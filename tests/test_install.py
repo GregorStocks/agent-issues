@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 from pathlib import Path
 
@@ -147,6 +148,27 @@ def test_repo_install_adds_repo_guidance_and_global_skills(tmp_path: Path) -> No
 
     assert (target_repo / "AGENTS.md").read_text() == f"{agent_issues_line}\n"
     assert (target_repo / "CLAUDE.md").read_text() == "@AGENTS.md\n"
+    assert (target_repo / ".agent-issues/pretool-hook.json5").exists()
+    hook_script = target_repo / ".claude/hooks/agent-issues-pretool-hook.sh"
+    assert hook_script.exists()
+    assert os.access(hook_script, os.X_OK)
+    hook_text = hook_script.read_text()
+    assert "CLAUDE_PROJECT_DIR" in hook_text
+    assert "Local pre-tool hook failed" in hook_text
+    assert "agent-pretool-hook is not installed" in hook_text
+    assert 'uv tool dir --bin' in hook_text
+    settings = json.loads((target_repo / ".claude/settings.local.json").read_text())
+    assert settings["hooks"]["PreToolUse"] == [
+        {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": 'cd "${CLAUDE_PROJECT_DIR:-.}" && .claude/hooks/agent-issues-pretool-hook.sh',
+                }
+            ],
+        }
+    ]
     assert (home / ".claude/skills/agent-issues").is_symlink()
     assert (home / ".codex/skills/agent-issues").is_symlink()
     assert not (home / ".claude/CLAUDE.md").exists()
@@ -164,8 +186,30 @@ def test_repo_install_preserves_existing_repo_guidance(tmp_path: Path) -> None:
 
     agents_file = target_repo / "AGENTS.md"
     claude_file = target_repo / "CLAUDE.md"
+    hook_config = target_repo / ".agent-issues/pretool-hook.json5"
+    hook_script = target_repo / ".claude/hooks/agent-issues-pretool-hook.sh"
+    settings_file = target_repo / ".claude/settings.local.json"
     agents_file.write_text("Project-specific instructions.\n")
     claude_file.write_text("Existing Claude instructions.\n")
+    hook_config.parent.mkdir(parents=True)
+    hook_script.parent.mkdir(parents=True)
+    hook_config.write_text("{generated_paths: ['custom/generated']}\n")
+    hook_script.write_text("#!/bin/sh\ncustom hook\n")
+    settings_file.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Write",
+                            "hooks": [{"type": "command", "command": "custom-write-hook"}],
+                        }
+                    ]
+                }
+            }
+        )
+        + "\n"
+    )
 
     _run_repo_install(repo_root, target_repo, home, bin_dir)
     _run_repo_install(repo_root, target_repo, home, bin_dir)
@@ -182,3 +226,19 @@ def test_repo_install_preserves_existing_repo_guidance(tmp_path: Path) -> None:
     assert claude_text == "Existing Claude instructions.\n\n@AGENTS.md\n"
     assert agents_text.count(agent_issues_line) == 1
     assert claude_text.count("@AGENTS.md") == 1
+    assert hook_config.read_text() == "{generated_paths: ['custom/generated']}\n"
+    assert hook_script.read_text() == "#!/bin/sh\ncustom hook\n"
+    settings = json.loads(settings_file.read_text())
+    pretool_hooks = settings["hooks"]["PreToolUse"]
+    assert pretool_hooks.count(
+        {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": 'cd "${CLAUDE_PROJECT_DIR:-.}" && .claude/hooks/agent-issues-pretool-hook.sh',
+                }
+            ],
+        }
+    ) == 1
+    assert pretool_hooks[0]["matcher"] == "Write"
