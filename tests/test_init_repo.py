@@ -133,13 +133,9 @@ def test_generated_files_do_not_overwrite_diverged_generated_content(tmp_path: P
 
 
 def test_optional_makefile_and_ci_snippets_are_generated(tmp_path: Path) -> None:
-    makefile = tmp_path / "Makefile"
-    makefile.write_text("test:\n\tpytest\n")
-
     init_repo.run_init(_args(tmp_path, makefile_snippet=True, ci_snippet=True))
 
-    makefile_text = makefile.read_text()
-    assert "test:\n\tpytest\n" in makefile_text
+    makefile_text = (tmp_path / "Makefile").read_text()
     assert "issue-fmt:" in makefile_text
     ci_snippet = tmp_path / ".agent-issues/snippets/agent-issues-ci.yml"
     assert init_repo.GENERATED_BEGIN in ci_snippet.read_text()
@@ -152,19 +148,19 @@ def test_makefile_snippet_uses_gnu_make_preferred_file(tmp_path: Path) -> None:
 
     actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
 
-    assert "update GNUmakefile" in actions
-    assert "issue-fmt:" in gnu_makefile.read_text()
+    assert "skip GNUmakefile: custom content exists" in actions
+    assert gnu_makefile.read_text() == "test:\n\tpytest\n"
     assert not (tmp_path / "Makefile").exists()
 
 
-def test_makefile_snippet_skips_custom_issue_targets(tmp_path: Path) -> None:
+def test_makefile_snippet_skips_existing_custom_makefile(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
-    makefile.write_text("issue-fmt:\n\tcustom-format\n")
+    makefile.write_text("test:\n\tpytest\n")
 
     actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
 
-    assert "skip Makefile: custom issue target exists" in actions
-    assert makefile.read_text() == "issue-fmt:\n\tcustom-format\n"
+    assert "skip Makefile: custom content exists" in actions
+    assert makefile.read_text() == "test:\n\tpytest\n"
 
 
 def test_makefile_snippet_skips_combined_custom_issue_targets(tmp_path: Path) -> None:
@@ -173,22 +169,18 @@ def test_makefile_snippet_skips_combined_custom_issue_targets(tmp_path: Path) ->
 
     actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
 
-    assert "skip Makefile: custom issue target exists" in actions
+    assert "skip Makefile: custom content exists" in actions
     assert makefile.read_text() == "issue-fmt issue-lint:\n\tcustom-check\n"
 
 
-def test_makefile_snippet_ignores_recipe_lines_that_mention_issue_targets(
-    tmp_path: Path,
-) -> None:
+def test_makefile_snippet_skips_variable_defined_issue_targets(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
-    makefile.write_text("help:\n\t@echo issue-fmt: format issues\n")
+    makefile.write_text("ISSUE_TARGETS := issue-fmt issue-lint\n$(ISSUE_TARGETS):\n\tcustom-check\n")
 
     actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
 
-    assert "update Makefile" in actions
-    makefile_text = makefile.read_text()
-    assert "@echo issue-fmt: format issues" in makefile_text
-    assert "\nissue-fmt:\n\tuv run issue-fmt\n" in makefile_text
+    assert "skip Makefile: custom content exists" in actions
+    assert "$(ISSUE_TARGETS):" in makefile.read_text()
 
 
 def test_makefile_snippet_skips_diverged_generated_block(tmp_path: Path) -> None:

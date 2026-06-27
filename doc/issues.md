@@ -56,8 +56,9 @@ agent-issues-init [--dry-run] [--all]
 By default this creates only `issues/.gitignore`, leaving the directory present
 without changing ignore behavior. Optional flags add repo guidance includes,
 local skill-note templates, shared pre-tool hook files, or Makefile/CI snippets.
-The command skips existing custom files and generated files that have diverged
-from the default template.
+Makefile snippets are created only when no GNU makefile already exists. The
+command skips existing custom files and generated files that have diverged from
+the default template.
 
 ### List all issues with priority
 
