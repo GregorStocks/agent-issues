@@ -116,6 +116,22 @@ def test_generated_files_do_not_overwrite_custom_content(tmp_path: Path) -> None
     assert skill_note.read_text() == "Custom local skill notes.\n"
 
 
+def test_generated_files_do_not_overwrite_diverged_generated_content(tmp_path: Path) -> None:
+    skill_note = tmp_path / ".agents/skills/solve-issue-local/SKILL.md"
+    skill_note.parent.mkdir(parents=True)
+    skill_note.write_text(
+        init_repo.LOCAL_SKILL_NOTE.replace(
+            "- Add this repository's test, lint, and formatting commands here.",
+            "- uv run pytest",
+        )
+    )
+
+    actions = init_repo.run_init(_args(tmp_path, local_skill_notes=True))
+
+    assert "skip .agents/skills/solve-issue-local/SKILL.md: generated content differs" in actions
+    assert "- uv run pytest" in skill_note.read_text()
+
+
 def test_optional_makefile_and_ci_snippets_are_generated(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
     makefile.write_text("test:\n\tpytest\n")
@@ -138,6 +154,16 @@ def test_makefile_snippet_skips_custom_issue_targets(tmp_path: Path) -> None:
 
     assert "skip Makefile: custom issue target exists" in actions
     assert makefile.read_text() == "issue-fmt:\n\tcustom-format\n"
+
+
+def test_makefile_snippet_skips_diverged_generated_block(tmp_path: Path) -> None:
+    makefile = tmp_path / "Makefile"
+    makefile.write_text(init_repo.MAKEFILE_BLOCK.replace("uv run issue-fmt", "custom-format"))
+
+    actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
+
+    assert "skip Makefile: generated block differs" in actions
+    assert "custom-format" in makefile.read_text()
 
 
 def test_umbrella_init_dispatches_to_init_command(tmp_path: Path) -> None:

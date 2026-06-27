@@ -166,10 +166,13 @@ class Bootstrapper:
                 if mode is not None and not self.dry_run:
                     path.chmod(mode)
                 return
-            if GENERATED_LABEL not in current:
-                self._record("skip", path, "custom content exists")
-                return
-            action = "would update" if self.dry_run else "update"
+            detail = (
+                "generated content differs"
+                if GENERATED_LABEL in current
+                else "custom content exists"
+            )
+            self._record("skip", path, detail)
+            return
         else:
             action = "would create" if self.dry_run else "create"
 
@@ -207,7 +210,11 @@ class Bootstrapper:
                 return
             if GENERATED_BEGIN in current and GENERATED_END in current:
                 before, rest = current.split(GENERATED_BEGIN, 1)
-                _, after = rest.split(GENERATED_END, 1)
+                block, after = rest.split(GENERATED_END, 1)
+                existing_block = f"{GENERATED_BEGIN}{block}{GENERATED_END}"
+                if existing_block.strip() != MAKEFILE_BLOCK.strip():
+                    self._record("skip", path, "generated block differs")
+                    return
                 content = f"{before}{MAKEFILE_BLOCK.rstrip()}{after}"
             elif ISSUE_MAKE_TARGET_RE.search(current):
                 self._record("skip", path, "custom issue target exists")
