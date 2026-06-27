@@ -252,22 +252,18 @@ class Bootstrapper:
             try:
                 data = json.loads(path.read_text())
             except json.JSONDecodeError:
-                self._record("skip", path, "invalid JSON")
-                return
+                raise SystemExit(f"{self._relative(path)}: invalid JSON")
             if not isinstance(data, dict):
-                self._record("skip", path, "expected JSON object")
-                return
+                raise SystemExit(f"{self._relative(path)}: expected JSON object")
         else:
             data = {}
 
         hooks = data.setdefault("hooks", {})
         if not isinstance(hooks, dict):
-            self._record("skip", path, "expected hooks object")
-            return
+            raise SystemExit(f"{self._relative(path)}: expected hooks object")
         pretool = hooks.setdefault("PreToolUse", [])
         if not isinstance(pretool, list):
-            self._record("skip", path, "expected PreToolUse list")
-            return
+            raise SystemExit(f"{self._relative(path)}: expected PreToolUse list")
         if HOOK_ENTRY in pretool:
             self._record("skip", path, "hook already present")
             return

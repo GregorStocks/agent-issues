@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from agent_issues import pretool_hook
 from agent_issues.cli import agent_issues, init_repo
 
@@ -98,6 +100,24 @@ def test_hook_scaffolding_merges_claude_settings(tmp_path: Path) -> None:
     pretool = data["hooks"]["PreToolUse"]
     assert pretool[0]["matcher"] == "Write"
     assert pretool.count(init_repo.HOOK_ENTRY) == 1
+
+
+def test_hook_scaffolding_fails_on_invalid_claude_settings(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude/settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{invalid json\n")
+
+    with pytest.raises(SystemExit, match=r"\.claude/settings\.local\.json: invalid JSON"):
+        init_repo.run_init(_args(tmp_path, hook=True))
+
+
+def test_hook_scaffolding_fails_on_unmergeable_claude_settings(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude/settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"hooks": []}) + "\n")
+
+    with pytest.raises(SystemExit, match=r"\.claude/settings\.local\.json: expected hooks object"):
+        init_repo.run_init(_args(tmp_path, hook=True))
 
 
 def test_generated_files_do_not_overwrite_custom_content(tmp_path: Path) -> None:
