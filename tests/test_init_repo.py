@@ -130,6 +130,16 @@ def test_optional_makefile_and_ci_snippets_are_generated(tmp_path: Path) -> None
     assert "issue-lint" in ci_snippet.read_text()
 
 
+def test_makefile_snippet_skips_custom_issue_targets(tmp_path: Path) -> None:
+    makefile = tmp_path / "Makefile"
+    makefile.write_text("issue-fmt:\n\tcustom-format\n")
+
+    actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
+
+    assert "skip Makefile: custom issue target exists" in actions
+    assert makefile.read_text() == "issue-fmt:\n\tcustom-format\n"
+
+
 def test_umbrella_init_dispatches_to_init_command(tmp_path: Path) -> None:
     agent_issues.main(["init", "--agents", str(tmp_path)])
 

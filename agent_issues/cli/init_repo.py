@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Sequence
 
@@ -18,6 +19,7 @@ GENERATED_BEGIN = "# BEGIN agent-issues generated"
 GENERATED_END = "# END agent-issues generated"
 JSON5_GENERATED_BEGIN = "// BEGIN agent-issues generated"
 JSON5_GENERATED_END = "// END agent-issues generated"
+ISSUE_MAKE_TARGET_RE = re.compile(r"^(?:issue-fmt|issue-lint)\s*:", re.MULTILINE)
 
 HOOK_ENTRY = {
     "matcher": "Bash",
@@ -207,6 +209,9 @@ class Bootstrapper:
                 before, rest = current.split(GENERATED_BEGIN, 1)
                 _, after = rest.split(GENERATED_END, 1)
                 content = f"{before}{MAKEFILE_BLOCK.rstrip()}{after}"
+            elif ISSUE_MAKE_TARGET_RE.search(current):
+                self._record("skip", path, "custom issue target exists")
+                return
             else:
                 separator = "\n" if current.endswith("\n") else "\n\n"
                 content = f"{current}{separator}{MAKEFILE_BLOCK}"
