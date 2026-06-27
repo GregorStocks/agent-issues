@@ -7,6 +7,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from agent_issues.cli import init_repo
+
 
 def _write_fake_uv(bin_dir: Path) -> None:
     uv = bin_dir / "uv"
@@ -148,7 +150,9 @@ def test_repo_install_adds_repo_guidance_and_global_skills(tmp_path: Path) -> No
 
     assert (target_repo / "AGENTS.md").read_text() == f"{agent_issues_line}\n"
     assert (target_repo / "CLAUDE.md").read_text() == "@AGENTS.md\n"
-    assert (target_repo / ".agent-issues/pretool-hook.json5").exists()
+    assert (target_repo / "issues/.gitignore").read_text() == ""
+    hook_config_text = (target_repo / ".agent-issues/pretool-hook.json5").read_text()
+    assert init_repo.JSON5_GENERATED_BEGIN in hook_config_text
     hook_script = target_repo / ".claude/hooks/agent-issues-pretool-hook.sh"
     assert hook_script.exists()
     assert os.access(hook_script, os.X_OK)
