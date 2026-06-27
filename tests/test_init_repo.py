@@ -156,6 +156,16 @@ def test_makefile_snippet_skips_custom_issue_targets(tmp_path: Path) -> None:
     assert makefile.read_text() == "issue-fmt:\n\tcustom-format\n"
 
 
+def test_makefile_snippet_skips_combined_custom_issue_targets(tmp_path: Path) -> None:
+    makefile = tmp_path / "Makefile"
+    makefile.write_text("issue-fmt issue-lint:\n\tcustom-check\n")
+
+    actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
+
+    assert "skip Makefile: custom issue target exists" in actions
+    assert makefile.read_text() == "issue-fmt issue-lint:\n\tcustom-check\n"
+
+
 def test_makefile_snippet_skips_diverged_generated_block(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
     makefile.write_text(init_repo.MAKEFILE_BLOCK.replace("uv run issue-fmt", "custom-format"))

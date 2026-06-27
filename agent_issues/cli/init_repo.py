@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 from typing import Sequence
 
@@ -19,7 +18,7 @@ GENERATED_BEGIN = "# BEGIN agent-issues generated"
 GENERATED_END = "# END agent-issues generated"
 JSON5_GENERATED_BEGIN = "// BEGIN agent-issues generated"
 JSON5_GENERATED_END = "// END agent-issues generated"
-ISSUE_MAKE_TARGET_RE = re.compile(r"^(?:issue-fmt|issue-lint)\s*:", re.MULTILINE)
+ISSUE_MAKE_TARGETS = {"issue-fmt", "issue-lint"}
 
 HOOK_ENTRY = {
     "matcher": "Bash",
@@ -216,7 +215,7 @@ class Bootstrapper:
                     self._record("skip", path, "generated block differs")
                     return
                 content = f"{before}{MAKEFILE_BLOCK.rstrip()}{after}"
-            elif ISSUE_MAKE_TARGET_RE.search(current):
+            elif has_issue_make_target(current):
                 self._record("skip", path, "custom issue target exists")
                 return
             else:
@@ -265,6 +264,17 @@ class Bootstrapper:
         if not self.dry_run:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def has_issue_make_target(makefile_text: str) -> bool:
+    for line in makefile_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or ":" not in line:
+            continue
+        target_text = line.split(":", 1)[0]
+        if ISSUE_MAKE_TARGETS.intersection(target_text.split()):
+            return True
+    return False
 
 
 def run_init(args: argparse.Namespace) -> list[str]:
