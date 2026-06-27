@@ -116,6 +116,18 @@ def test_generated_files_do_not_overwrite_custom_content(tmp_path: Path) -> None
     assert skill_note.read_text() == "Custom local skill notes.\n"
 
 
+def test_local_skill_notes_include_solve_issue_and_create_pr(tmp_path: Path) -> None:
+    init_repo.run_init(_args(tmp_path, local_skill_notes=True))
+
+    assert (tmp_path / ".agents/skills/solve-issue-local/SKILL.md").exists()
+    assert (tmp_path / ".agents/skills/create-pr-local/SKILL.md").exists()
+    assert (tmp_path / ".claude/skills/solve-issue-local/SKILL.md").exists()
+    assert (tmp_path / ".claude/skills/create-pr-local/SKILL.md").exists()
+    assert "Local Create-PR Notes" in (
+        tmp_path / ".agents/skills/create-pr-local/SKILL.md"
+    ).read_text()
+
+
 def test_generated_files_do_not_overwrite_diverged_generated_content(tmp_path: Path) -> None:
     skill_note = tmp_path / ".agents/skills/solve-issue-local/SKILL.md"
     skill_note.parent.mkdir(parents=True)

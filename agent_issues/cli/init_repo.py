@@ -103,6 +103,25 @@ already covered by the global `solve-issue` and `submit-pr` skills.
 {GENERATED_END}
 """
 
+CREATE_PR_LOCAL_SKILL_NOTE = f"""---
+name: create-pr-local
+description: Repo-specific notes for the global create-pr workflow.
+---
+
+{GENERATED_BEGIN}
+# Local Create-PR Notes
+
+Keep this file narrow. List only repo-specific validation commands,
+generated-artifact rules, dependency policy, pre-PR checks, and project
+constraints that are not already covered by the global `create-pr` and
+`submit-pr` skills.
+
+## Validation
+
+- Add this repository's test, lint, and formatting commands here.
+{GENERATED_END}
+"""
+
 MAKEFILE_BLOCK = f"""{GENERATED_BEGIN}
 .PHONY: issue-fmt issue-lint
 
@@ -297,8 +316,16 @@ def run_init(args: argparse.Namespace) -> list[str]:
             LOCAL_SKILL_NOTE,
         )
         bootstrapper.ensure_generated_file(
+            root / ".agents/skills/create-pr-local/SKILL.md",
+            CREATE_PR_LOCAL_SKILL_NOTE,
+        )
+        bootstrapper.ensure_generated_file(
             root / ".claude/skills/solve-issue-local/SKILL.md",
             LOCAL_SKILL_NOTE,
+        )
+        bootstrapper.ensure_generated_file(
+            root / ".claude/skills/create-pr-local/SKILL.md",
+            CREATE_PR_LOCAL_SKILL_NOTE,
         )
     if args.all or args.makefile_snippet:
         bootstrapper.ensure_makefile_block()
