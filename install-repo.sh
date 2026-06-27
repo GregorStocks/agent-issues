@@ -108,14 +108,52 @@ ensure_file "$HOOK_CONFIG" "644" '{
   // sandbox. Keep normal project guidance declarative here; use
   // .claude/hooks/pretool-local.sh only for small repo-specific checks that do
   // not fit this config.
+  //
+  // Name of the environment variable an agent must set to the exact branch
+  // name when a human has explicitly approved a git switch/checkout.
   branch_switch_signoff_env: "AGENT_BRANCH_SWITCH_SIGNOFF",
+
+  // Repo-relative files or directories that are generated output. The hook
+  // blocks direct shell edits to these paths and checks for dirty generated
+  // output before publishing. Leave empty if the repo has no generated output.
   generated_paths: [],
+
+  // Command agents should run when generated_paths need to be updated, for
+  // example "make generate" or "uv run tools/build-generated.py".
   generated_command: "the generator target",
+
+  // Human-readable description of the repo's issue tracker. This appears when
+  // an agent tries to use gh issue commands.
   github_issue_guidance: "local JSON5 issue files in issues/",
+
+  // Blocks whole command families such as raw package-manager or formatter
+  // commands. Each entry has:
+  //   command: executable basename to block, for example "cargo"
+  //   message: guidance shown for any blocked use
+  //   subcommands: optional map from subcommand to preferred replacement
+  // Example:
+  //   {command: "cargo", message: "Use Makefile targets.", subcommands: {test: "make test"}}
   command_family_blocks: [],
+
+  // Blocks repo binaries by basename or fnmatch-style path pattern. Use this
+  // when agents should run a wrapper instead of invoking built artifacts
+  // directly. Example:
+  //   {pattern: "target/*/project-cli", message: "Use make test."}
   binary_blocks: [],
+
+  // Make targets that are implementation details. Map target name to the
+  // public command agents should use instead, for example:
+  //   {_generate: "make generate"}
   internal_make_targets: {},
+
+  // Make targets that need a longer tool timeout. Values are milliseconds, for
+  // example 4200000 for 70 minutes:
+  //   {test: 4200000}
   make_targets_requiring_timeout_ms: {},
+
+  // Minimum tool timeout for agent-submit, in milliseconds. Keep this long
+  // enough for push, PR metadata updates, CI watching, and review polling.
+  minimum_agent_submit_timeout_ms: 4200000,
 }'
 ensure_file "$HOOK_SCRIPT" "755" '#!/bin/sh
 set -eu
