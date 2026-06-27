@@ -46,6 +46,20 @@ or inspect it with `uv tool dir --bin`.
 
 Once installed, these commands are available:
 
+### Bootstrap a repository
+
+```bash
+agent-issues init [--dry-run] [--agents] [--claude] [--hook]
+agent-issues-init [--dry-run] [--all]
+```
+
+By default this creates only `issues/.gitignore`, leaving the directory present
+without changing ignore behavior. Optional flags add repo guidance includes,
+local skill-note templates, shared pre-tool hook files, or Makefile/CI snippets.
+Makefile snippets are created only when no GNU makefile already exists. The
+command skips existing custom files and generated files that have diverged from
+the default template.
+
 ### List all issues with priority
 
 ```bash
