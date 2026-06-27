@@ -269,6 +269,8 @@ class Bootstrapper:
 
 def has_issue_make_target(makefile_text: str) -> bool:
     for line in makefile_text.splitlines():
+        if line.startswith("\t"):
+            continue
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or ":" not in line:
             continue
