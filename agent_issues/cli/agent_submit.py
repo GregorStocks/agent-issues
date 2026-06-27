@@ -1,16 +1,30 @@
-"""Push HEAD, create or update the PR, and watch for CI+review outcomes."""
+"""Run submit hooks, push HEAD, upsert the PR, and watch CI/review outcomes."""
 
 import argparse
+from dataclasses import dataclass
 import json
+import os
+from pathlib import Path
 import re
 import subprocess
 import sys
 from typing import Sequence
 
 from agent_issues.cli import issue_watch_pr
+from agent_issues.json5_utils import loads_json5
 
 EXIT_PREFLIGHT = 10
 ESCAPED_BACKTICK_CODE_SPAN = re.compile(r"\\`[^\n`]+\\`")
+SUBMIT_HOOK_CONFIG = Path(".agent-issues/submit-hooks.json5")
+SUBMIT_HOOK_PHASES = ("prepare", "after_publish")
+
+
+@dataclass(frozen=True)
+class SubmitHooks:
+    root: Path
+    config_path: Path | None = None
+    prepare: tuple[str, ...] = ()
+    after_publish: tuple[str, ...] = ()
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -30,6 +44,148 @@ def validate_pr_body_markdown(body: str, allow_escaped_backticks: bool = False) 
         flush=True,
     )
     return EXIT_PREFLIGHT
+
+
+def find_submit_hook_config(start: Path | None = None) -> Path | None:
+    """Find the nearest repo-local submit hook config from start or cwd."""
+    directory = (start or Path.cwd()).resolve()
+    if directory.is_file():
+        directory = directory.parent
+
+    for candidate_dir in (directory, *directory.parents):
+        candidate = candidate_dir / SUBMIT_HOOK_CONFIG
+        if candidate.exists():
+            return candidate
+        if (candidate_dir / ".git").exists():
+            break
+    return None
+
+
+def _load_hook_command_list(data: object, key: str, path: Path) -> tuple[str, ...]:
+    if data is None:
+        return ()
+    if not isinstance(data, list):
+        raise SystemExit(f"{path}: {key} must be a list of shell command strings")
+
+    commands: list[str] = []
+    for index, item in enumerate(data):
+        if not isinstance(item, str) or not item.strip():
+            raise SystemExit(
+                f"{path}: {key}[{index}] must be a non-empty shell command string"
+            )
+        commands.append(item)
+    return tuple(commands)
+
+
+def load_submit_hooks(start: Path | None = None) -> SubmitHooks:
+    path = find_submit_hook_config(start)
+    if path is None:
+        return SubmitHooks(root=(start or Path.cwd()).resolve())
+
+    data = loads_json5(path.read_text())
+    if not isinstance(data, dict):
+        raise SystemExit(f"{path}: expected a JSON5 object")
+
+    unknown_keys = sorted(set(data) - set(SUBMIT_HOOK_PHASES))
+    if unknown_keys:
+        keys = ", ".join(unknown_keys)
+        raise SystemExit(f"{path}: unknown submit hook key(s): {keys}")
+
+    return SubmitHooks(
+        root=path.parent.parent,
+        config_path=path,
+        prepare=_load_hook_command_list(data.get("prepare"), "prepare", path),
+        after_publish=_load_hook_command_list(
+            data.get("after_publish"), "after_publish", path
+        ),
+    )
+
+
+def _head_sha() -> str:
+    result = _run(["git", "rev-parse", "HEAD"])
+    assert result.returncode == 0, f"git rev-parse HEAD failed: {result.stderr}"
+    sha = result.stdout.strip()
+    assert sha, "Expected non-empty HEAD SHA"
+    return sha
+
+
+def _ensure_clean_worktree(reason: str) -> int:
+    status = _run(["git", "status", "--porcelain"])
+    assert status.returncode == 0, f"git status failed: {status.stderr}"
+    if not status.stdout.strip():
+        return 0
+
+    print(
+        f"agent-submit: refusing to continue — {reason} left uncommitted changes. "
+        "Commit intentional changes or fix the hook before retrying.",
+        flush=True,
+    )
+    print(status.stdout, end="", flush=True)
+    return EXIT_PREFLIGHT
+
+
+def _ensure_branch_unchanged(expected: str, phase: str) -> int:
+    actual = _current_branch()
+    if actual == expected:
+        return 0
+    print(
+        f"agent-submit: refusing to continue — {phase} hook changed branches "
+        f"from {expected} to {actual}. Switch back and retry.",
+        flush=True,
+    )
+    return EXIT_PREFLIGHT
+
+
+def _ensure_head_unchanged(expected: str, phase: str) -> int:
+    actual = _head_sha()
+    if actual == expected:
+        return 0
+    print(
+        f"agent-submit: refusing to continue — {phase} hook changed HEAD after "
+        "the branch was pushed. Commit those changes before retrying.",
+        flush=True,
+    )
+    return EXIT_PREFLIGHT
+
+
+def run_submit_hooks(
+    hooks: SubmitHooks,
+    phase: str,
+    *,
+    branch: str,
+    base: str,
+    sha: str,
+    pr_number: str | None = None,
+) -> int:
+    commands = getattr(hooks, phase)
+    if not commands:
+        return 0
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "AGENT_SUBMIT_PHASE": phase,
+            "AGENT_SUBMIT_REPO_ROOT": str(hooks.root),
+            "AGENT_SUBMIT_BRANCH": branch,
+            "AGENT_SUBMIT_BASE": base,
+            "AGENT_SUBMIT_SHA": sha,
+        }
+    )
+    if pr_number is not None:
+        env["AGENT_SUBMIT_PR_NUMBER"] = pr_number
+
+    config = f" from {hooks.config_path}" if hooks.config_path is not None else ""
+    for command in commands:
+        print(f"agent-submit: running {phase} hook{config}: {command}", flush=True)
+        result = subprocess.run(command, cwd=hooks.root, env=env, shell=True)
+        if result.returncode != 0:
+            print(
+                f"agent-submit: {phase} hook failed with exit code "
+                f"{result.returncode}: {command}",
+                flush=True,
+            )
+            return EXIT_PREFLIGHT
+    return 0
 
 
 def _default_branch() -> str:
@@ -168,7 +324,10 @@ def _print_next_step(code: int) -> None:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Push HEAD, create or update the PR, and run the CI watcher.",
+        description=(
+            "Run repo submit hooks, push HEAD, create or update the PR, "
+            "and run the CI watcher."
+        ),
     )
     parser.add_argument("--title", required=True, help="PR title")
     parser.add_argument("--body", required=True, help="PR body")
@@ -208,16 +367,56 @@ def main() -> None:
     if code != 0:
         sys.exit(code)
 
+    hooks = load_submit_hooks()
     branch = _current_branch()
     base = args.base if args.base is not None else _default_branch()
+
+    if hooks.prepare:
+        code = run_submit_hooks(
+            hooks,
+            "prepare",
+            branch=branch,
+            base=base,
+            sha=_head_sha(),
+        )
+        if code != 0:
+            sys.exit(code)
+        code = _ensure_branch_unchanged(branch, "prepare")
+        if code != 0:
+            sys.exit(code)
+        code = _ensure_clean_worktree("prepare hook")
+        if code != 0:
+            sys.exit(code)
 
     push_code = _push(force=args.force)
     if push_code != 0:
         sys.exit(push_code)
 
+    published_sha = _head_sha() if hooks.after_publish else ""
     pr_number = upsert_pr(
         branch=branch, base=base, title=args.title, body=args.body, draft=args.draft
     )
+
+    if hooks.after_publish:
+        code = run_submit_hooks(
+            hooks,
+            "after_publish",
+            branch=branch,
+            base=base,
+            sha=published_sha,
+            pr_number=pr_number,
+        )
+        if code != 0:
+            sys.exit(code)
+        code = _ensure_branch_unchanged(branch, "after_publish")
+        if code != 0:
+            sys.exit(code)
+        code = _ensure_head_unchanged(published_sha, "after_publish")
+        if code != 0:
+            sys.exit(code)
+        code = _ensure_clean_worktree("after-publish hook")
+        if code != 0:
+            sys.exit(code)
 
     watcher_code = issue_watch_pr.run(pr=pr_number)
     _print_next_step(watcher_code)

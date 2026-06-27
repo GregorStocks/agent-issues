@@ -53,7 +53,7 @@ For each canonical key, locate the issue file:
 
    **If issue arguments were passed**, add a short **Issue context** section immediately above `## Summary`. Write it for a reader who may not remember the issue they filed days earlier: what the bug/task was, how it showed up, and why this change fixes it. Pull from the issue file (working tree or git history).
 
-4. **Run `agent-submit`**. It pushes HEAD, creates or updates the PR with your title/body, and runs the CI watcher end-to-end:
+4. **Run `agent-submit`**. It runs any repo-configured submit hooks, pushes HEAD, creates or updates the PR with your title/body, and runs the CI watcher end-to-end:
 
    ```bash
    agent-submit --title "<title>" --body "$(cat <<'EOF'
@@ -61,6 +61,16 @@ For each canonical key, locate the issue file:
    EOF
    )"
    ```
+
+  If `.agent-issues/submit-hooks.json5` exists, `agent-submit` runs its `prepare`
+  commands after basic clean-tree preflight and before pushing. Repos should put
+  required validation, generated artifact refreshes, and intentional generated
+  artifact commits there when those steps must happen on every submit.
+  `agent-submit` then pushes, creates or updates the PR, and runs
+  `after_publish` commands before starting the watcher. Repos should put signoff
+  or status creation there when it needs the final pushed SHA. If a hook fails,
+  leaves uncommitted changes, switches branches, or changes HEAD after publish,
+  fix that local problem and rerun `agent-submit`.
 
   Do not proceed to step 5 or declare victory until agent-submit has actually exited. If you run it through a command wrapper that has its own timeout, set that wrapper timeout above agent-submit's internal watcher timeout, preferably at least 70 minutes. A shorter wrapper timeout hides agent-submit's actionable exit code and timeout guidance. If you notice that CI is passing and agent-submit has not exited, we are likely still waiting for review.
 
@@ -72,7 +82,7 @@ For each canonical key, locate the issue file:
    | 1     | CI failed or merge conflict. If merge conflict, merge the default branch and resolve. Otherwise use `gh run view <run-id> --log-failed` (ID from the printed link) to find the failure, fix the root cause, commit, then loop back to step 1. |
    | 2     | Review feedback arrived. Read the printed feedback; for inline comments fetch full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each comment, commit, then loop back to step 1. |
    | 4     | Watcher timed out. Stop and consult the user before continuing. If the user asks you to continue later, first inspect and address any PR feedback that arrived while stopped, then re-run `agent-submit`; do not replace it with manual PR watching via `gh` or connector tools. |
-   | 10+   | Preflight failed (on default branch, dirty working tree, not a git repo, etc.). Fix and loop back to step 1. |
+   | 10+   | Preflight or submit hook failed (on default branch, dirty working tree, not a git repo, failed local validation/signoff hook, etc.). Fix and loop back to step 1. |
 
 6. **Cap at 10 iterations.** If after 10 fix-and-resubmit rounds CI still fails or new feedback keeps arriving, report the situation to the user and stop.
 
@@ -81,6 +91,9 @@ For each canonical key, locate the issue file:
 - **Root-cause fixes only.** When CI fails, diagnose the actual failure — don't paper over it with a broader timeout, a skipped test, or a `try/except` that swallows the error.
 - **One logical change per PR** — if a CI failure or review comment reveals work that belongs in a separate PR, note it for the user rather than bundling it in.
 - **Never skip hooks** (`--no-verify`) or bypass signing to make `agent-submit` pass. If a hook fails, fix the underlying issue.
+- **Do not bypass submit hooks**. If a repo has `.agent-issues/submit-hooks.json5`,
+  do not manually replace those commands with raw `git push`, `gh pr edit`,
+  `gh signoff`, or ad hoc local checks.
 - Repo-local PR skills should not restate this workflow. Keep `create-pr-local`
   and `solve-issue-local` focused on local validation commands, generated files,
   dependency policy, and repo-specific constraints; this skill owns PR metadata,

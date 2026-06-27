@@ -1,5 +1,6 @@
 """Tests for agent_issues.cli.agent_submit."""
 
+from pathlib import Path
 import sys
 from subprocess import CompletedProcess
 from unittest.mock import patch
@@ -69,6 +70,127 @@ def test_validate_pr_body_markdown_allows_literal_escaped_backticks_with_flag() 
         )
         == 0
     )
+
+
+def test_load_submit_hooks_returns_empty_when_config_absent(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    hooks = agent_submit.load_submit_hooks()
+
+    assert hooks.root == tmp_path
+    assert hooks.config_path is None
+    assert hooks.prepare == ()
+    assert hooks.after_publish == ()
+
+
+def test_load_submit_hooks_reads_nearest_repo_config(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / ".agent-issues/submit-hooks.json5"
+    nested = tmp_path / "a/b"
+    config.parent.mkdir(parents=True)
+    nested.mkdir(parents=True)
+    config.write_text(
+        """
+        {
+          prepare: ["make agent-submit-prepare"],
+          after_publish: ["make agent-submit-after-publish"],
+        }
+        """
+    )
+    monkeypatch.chdir(nested)
+
+    hooks = agent_submit.load_submit_hooks()
+
+    assert hooks.root == tmp_path
+    assert hooks.config_path == config
+    assert hooks.prepare == ("make agent-submit-prepare",)
+    assert hooks.after_publish == ("make agent-submit-after-publish",)
+
+
+def test_load_submit_hooks_rejects_unknown_keys(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / ".agent-issues/submit-hooks.json5"
+    config.parent.mkdir(parents=True)
+    config.write_text("{presubmit: ['make check']}\n")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit, match="unknown submit hook"):
+        agent_submit.load_submit_hooks()
+
+
+def test_load_submit_hooks_rejects_non_string_commands(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / ".agent-issues/submit-hooks.json5"
+    config.parent.mkdir(parents=True)
+    config.write_text("{prepare: ['make check', 7]}\n")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit, match=r"prepare\[1\]"):
+        agent_submit.load_submit_hooks()
+
+
+def test_run_submit_hooks_passes_env_and_cwd(tmp_path: Path) -> None:
+    hooks = agent_submit.SubmitHooks(
+        root=tmp_path,
+        config_path=tmp_path / ".agent-issues/submit-hooks.json5",
+        prepare=("make agent-submit-prepare",),
+    )
+    with patch("agent_issues.cli.agent_submit.subprocess.run") as run_mock:
+        run_mock.return_value = CompletedProcess(args=[], returncode=0)
+        code = agent_submit.run_submit_hooks(
+            hooks,
+            "prepare",
+            branch="feature-x",
+            base="main",
+            sha="abc123",
+        )
+
+    assert code == 0
+    assert run_mock.call_args.args[0] == "make agent-submit-prepare"
+    kwargs = run_mock.call_args.kwargs
+    assert kwargs["cwd"] == tmp_path
+    assert kwargs["shell"] is True
+    assert kwargs["env"]["AGENT_SUBMIT_PHASE"] == "prepare"
+    assert kwargs["env"]["AGENT_SUBMIT_REPO_ROOT"] == str(tmp_path)
+    assert kwargs["env"]["AGENT_SUBMIT_BRANCH"] == "feature-x"
+    assert kwargs["env"]["AGENT_SUBMIT_BASE"] == "main"
+    assert kwargs["env"]["AGENT_SUBMIT_SHA"] == "abc123"
+    assert "AGENT_SUBMIT_PR_NUMBER" not in kwargs["env"]
+
+
+def test_run_submit_hooks_passes_pr_number_after_publish(tmp_path: Path) -> None:
+    hooks = agent_submit.SubmitHooks(
+        root=tmp_path,
+        after_publish=("make agent-submit-after-publish",),
+    )
+    with patch("agent_issues.cli.agent_submit.subprocess.run") as run_mock:
+        run_mock.return_value = CompletedProcess(args=[], returncode=0)
+        code = agent_submit.run_submit_hooks(
+            hooks,
+            "after_publish",
+            branch="feature-x",
+            base="main",
+            sha="def456",
+            pr_number="42",
+        )
+
+    assert code == 0
+    assert run_mock.call_args.kwargs["env"]["AGENT_SUBMIT_PR_NUMBER"] == "42"
+
+
+def test_run_submit_hooks_maps_command_failure_to_preflight_exit(
+    tmp_path: Path, capsys
+) -> None:
+    hooks = agent_submit.SubmitHooks(root=tmp_path, prepare=("make check",))
+    with patch("agent_issues.cli.agent_submit.subprocess.run") as run_mock:
+        run_mock.return_value = CompletedProcess(args=[], returncode=2)
+        code = agent_submit.run_submit_hooks(
+            hooks,
+            "prepare",
+            branch="feature-x",
+            base="main",
+            sha="abc123",
+        )
+
+    assert code == agent_submit.EXIT_PREFLIGHT
+    assert "prepare hook failed" in capsys.readouterr().out
 
 
 def test_push_omits_force_by_default() -> None:
@@ -262,6 +384,7 @@ def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
     with (
         patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
         patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
         patch.object(agent_submit, "_push", return_value=0) as push_mock,
@@ -306,6 +429,7 @@ def test_main_allows_escaped_backticks_with_flag() -> None:
             ],
         ),
         patch.object(agent_submit, "preflight", return_value=0) as preflight_mock,
+        patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
         patch.object(agent_submit, "_push", return_value=0),
@@ -323,6 +447,7 @@ def test_main_passes_force_flag_to_push() -> None:
     with (
         patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B", "--force"]),
         patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
         patch.object(agent_submit, "_push", return_value=0) as push_mock,
@@ -350,6 +475,7 @@ def test_main_exits_on_push_failure_without_upserting() -> None:
     with (
         patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
         patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
         patch.object(agent_submit, "_push", return_value=128),
@@ -359,3 +485,103 @@ def test_main_exits_on_push_failure_without_upserting() -> None:
         agent_submit.main()
     assert exc.value.code == 128
     upsert_mock.assert_not_called()
+
+
+def test_main_runs_submit_hooks_around_publish() -> None:
+    from agent_issues.cli import issue_watch_pr
+
+    hooks = agent_submit.SubmitHooks(
+        root=Path.cwd(),
+        prepare=("make agent-submit-prepare",),
+        after_publish=("make agent-submit-after-publish",),
+    )
+    events: list[tuple[str, str | None, str | None, str | None]] = []
+
+    def run_hooks(
+        _hooks: agent_submit.SubmitHooks,
+        phase: str,
+        *,
+        branch: str,
+        base: str,
+        sha: str,
+        pr_number: str | None = None,
+    ) -> int:
+        events.append((phase, branch, sha, pr_number))
+        assert _hooks == hooks
+        assert base == "main"
+        return 0
+
+    def push(*, force: bool = False) -> int:
+        assert force is False
+        events.append(("push", None, None, None))
+        return 0
+
+    def upsert_pr(**_kwargs: object) -> str:
+        events.append(("upsert", None, None, None))
+        return "42"
+
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "load_submit_hooks", return_value=hooks),
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_head_sha", side_effect=["before", "after", "after"]),
+        patch.object(agent_submit, "run_submit_hooks", side_effect=run_hooks),
+        patch.object(agent_submit, "_ensure_branch_unchanged", return_value=0),
+        patch.object(agent_submit, "_ensure_head_unchanged", return_value=0),
+        patch.object(agent_submit, "_ensure_clean_worktree", return_value=0),
+        patch.object(agent_submit, "_push", side_effect=push),
+        patch.object(agent_submit, "upsert_pr", side_effect=upsert_pr),
+        patch.object(issue_watch_pr, "run", return_value=0),
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+
+    assert exc.value.code == 0
+    assert events == [
+        ("prepare", "feature-x", "before", None),
+        ("push", None, None, None),
+        ("upsert", None, None, None),
+        ("after_publish", "feature-x", "after", "42"),
+    ]
+
+
+def test_main_exits_when_prepare_hook_fails_before_push() -> None:
+    hooks = agent_submit.SubmitHooks(root=Path.cwd(), prepare=("make check",))
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "load_submit_hooks", return_value=hooks),
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_head_sha", return_value="abc123"),
+        patch.object(agent_submit, "run_submit_hooks", return_value=agent_submit.EXIT_PREFLIGHT),
+        patch.object(agent_submit, "_push") as push_mock,
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+
+    assert exc.value.code == agent_submit.EXIT_PREFLIGHT
+    push_mock.assert_not_called()
+
+
+def test_main_exits_when_prepare_hook_leaves_dirty_tree() -> None:
+    hooks = agent_submit.SubmitHooks(root=Path.cwd(), prepare=("make check",))
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.object(agent_submit, "preflight", return_value=0),
+        patch.object(agent_submit, "load_submit_hooks", return_value=hooks),
+        patch.object(agent_submit, "_current_branch", return_value="feature-x"),
+        patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "_head_sha", return_value="abc123"),
+        patch.object(agent_submit, "run_submit_hooks", return_value=0),
+        patch.object(agent_submit, "_ensure_branch_unchanged", return_value=0),
+        patch.object(agent_submit, "_ensure_clean_worktree", return_value=agent_submit.EXIT_PREFLIGHT),
+        patch.object(agent_submit, "_push") as push_mock,
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+
+    assert exc.value.code == agent_submit.EXIT_PREFLIGHT
+    push_mock.assert_not_called()

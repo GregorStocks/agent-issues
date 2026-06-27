@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from agent_issues import pretool_hook
-from agent_issues.cli import agent_issues, init_repo
+from agent_issues.cli import agent_issues, agent_submit, init_repo
 
 
 def _args(tmp_path: Path, **overrides: bool) -> argparse.Namespace:
@@ -21,6 +21,7 @@ def _args(tmp_path: Path, **overrides: bool) -> argparse.Namespace:
         "agents": False,
         "claude": False,
         "hook": False,
+        "submit_hooks": False,
         "local_skill_notes": False,
         "makefile_snippet": False,
         "ci_snippet": False,
@@ -118,6 +119,22 @@ def test_hook_scaffolding_fails_on_unmergeable_claude_settings(tmp_path: Path) -
 
     with pytest.raises(SystemExit, match=r"\.claude/settings\.local\.json: expected hooks object"):
         init_repo.run_init(_args(tmp_path, hook=True))
+
+
+def test_submit_hook_config_is_generated(tmp_path: Path) -> None:
+    actions = init_repo.run_init(_args(tmp_path, submit_hooks=True))
+
+    assert actions == [
+        "create issues/.gitignore",
+        "create .agent-issues/submit-hooks.json5",
+    ]
+    config = tmp_path / ".agent-issues/submit-hooks.json5"
+    text = config.read_text()
+    assert init_repo.JSON5_GENERATED_BEGIN in text
+    assert "after_publish" in text
+    hooks = agent_submit.load_submit_hooks(tmp_path)
+    assert hooks.prepare == ()
+    assert hooks.after_publish == ()
 
 
 def test_generated_files_do_not_overwrite_custom_content(tmp_path: Path) -> None:
