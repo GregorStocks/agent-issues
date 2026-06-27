@@ -19,6 +19,7 @@ GENERATED_END = "# END agent-issues generated"
 JSON5_GENERATED_BEGIN = "// BEGIN agent-issues generated"
 JSON5_GENERATED_END = "// END agent-issues generated"
 ISSUE_MAKE_TARGETS = {"issue-fmt", "issue-lint"}
+MAKEFILE_CANDIDATES = ("GNUmakefile", "makefile", "Makefile")
 
 HOOK_ENTRY = {
     "matcher": "Bash",
@@ -201,7 +202,7 @@ class Bootstrapper:
             path.write_text(content)
 
     def ensure_makefile_block(self) -> None:
-        path = self.root / "Makefile"
+        path = preferred_makefile_path(self.root)
         if path.exists():
             current = path.read_text()
             if MAKEFILE_BLOCK.strip() in current:
@@ -275,6 +276,14 @@ def has_issue_make_target(makefile_text: str) -> bool:
         if ISSUE_MAKE_TARGETS.intersection(target_text.split()):
             return True
     return False
+
+
+def preferred_makefile_path(root: Path) -> Path:
+    existing_names = {path.name for path in root.iterdir()}
+    for name in MAKEFILE_CANDIDATES:
+        if name in existing_names:
+            return root / name
+    return root / "Makefile"
 
 
 def run_init(args: argparse.Namespace) -> list[str]:

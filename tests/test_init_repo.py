@@ -146,6 +146,17 @@ def test_optional_makefile_and_ci_snippets_are_generated(tmp_path: Path) -> None
     assert "issue-lint" in ci_snippet.read_text()
 
 
+def test_makefile_snippet_uses_gnu_make_preferred_file(tmp_path: Path) -> None:
+    gnu_makefile = tmp_path / "GNUmakefile"
+    gnu_makefile.write_text("test:\n\tpytest\n")
+
+    actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
+
+    assert "update GNUmakefile" in actions
+    assert "issue-fmt:" in gnu_makefile.read_text()
+    assert not (tmp_path / "Makefile").exists()
+
+
 def test_makefile_snippet_skips_custom_issue_targets(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
     makefile.write_text("issue-fmt:\n\tcustom-format\n")
