@@ -13,6 +13,8 @@ dev = [
 ]
 
 [project.scripts]
+agent-issues = "agent_issues.cli.agent_issues:main"
+agent-issues-init = "agent_issues.cli.init_repo:main"
 agent-preflight = "agent_issues.cli.agent_preflight:main"
 agent-pretool-hook = "agent_issues.cli.agent_pretool_hook:main"
 agent-submit = "agent_issues.cli.agent_submit:main"

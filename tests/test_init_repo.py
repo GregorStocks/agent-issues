@@ -1,0 +1,137 @@
+"""Tests for agent_issues.cli.init_repo."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+
+from agent_issues import pretool_hook
+from agent_issues.cli import agent_issues, init_repo
+
+
+def _args(tmp_path: Path, **overrides: bool) -> argparse.Namespace:
+    values = {
+        "repo_root": str(tmp_path),
+        "dry_run": False,
+        "all": False,
+        "agents": False,
+        "claude": False,
+        "hook": False,
+        "local_skill_notes": False,
+        "makefile_snippet": False,
+        "ci_snippet": False,
+    }
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_default_creates_empty_issues_gitignore(tmp_path: Path) -> None:
+    actions = init_repo.run_init(_args(tmp_path))
+
+    assert actions == ["create issues/.gitignore"]
+    assert (tmp_path / "issues/.gitignore").read_text() == ""
+
+    actions = init_repo.run_init(_args(tmp_path))
+    assert actions == ["skip issues/.gitignore: already present"]
+
+
+def test_dry_run_does_not_write_files(tmp_path: Path) -> None:
+    actions = init_repo.run_init(_args(tmp_path, dry_run=True, agents=True, claude=True))
+
+    assert actions == [
+        "would create issues/.gitignore",
+        "would create AGENTS.md",
+        "would create CLAUDE.md",
+    ]
+    assert not (tmp_path / "issues/.gitignore").exists()
+    assert not (tmp_path / "AGENTS.md").exists()
+    assert not (tmp_path / "CLAUDE.md").exists()
+
+
+def test_agents_and_claude_guidance_preserve_existing_content(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("Project notes.\n")
+    (tmp_path / "CLAUDE.md").write_text("Claude notes.\n")
+
+    init_repo.run_init(_args(tmp_path, agents=True, claude=True))
+    init_repo.run_init(_args(tmp_path, agents=True, claude=True))
+
+    assert (tmp_path / "AGENTS.md").read_text() == (
+        "Project notes.\n\n"
+        "Use the `agent-issues` skill for this repository's local issue tracking, "
+        "branch, and PR workflow.\n"
+    )
+    assert (tmp_path / "CLAUDE.md").read_text() == "Claude notes.\n\n@AGENTS.md\n"
+
+
+def test_hook_scaffolding_merges_claude_settings(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude/settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Write",
+                            "hooks": [{"type": "command", "command": "custom-write-hook"}],
+                        }
+                    ]
+                }
+            }
+        )
+        + "\n"
+    )
+
+    init_repo.run_init(_args(tmp_path, hook=True))
+    init_repo.run_init(_args(tmp_path, hook=True))
+
+    hook_config = tmp_path / ".agent-issues/pretool-hook.json5"
+    hook_script = tmp_path / ".claude/hooks/agent-issues-pretool-hook.sh"
+    assert init_repo.JSON5_GENERATED_BEGIN in hook_config.read_text()
+    assert pretool_hook.load_config(hook_config).minimum_agent_submit_timeout_ms == 4200000
+    assert init_repo.GENERATED_BEGIN in hook_script.read_text()
+    assert os.access(hook_script, os.X_OK)
+
+    data = json.loads(settings.read_text())
+    pretool = data["hooks"]["PreToolUse"]
+    assert pretool[0]["matcher"] == "Write"
+    assert pretool.count(init_repo.HOOK_ENTRY) == 1
+
+
+def test_generated_files_do_not_overwrite_custom_content(tmp_path: Path) -> None:
+    hook_config = tmp_path / ".agent-issues/pretool-hook.json5"
+    skill_note = tmp_path / ".agents/skills/solve-issue-local/SKILL.md"
+    hook_config.parent.mkdir(parents=True)
+    skill_note.parent.mkdir(parents=True)
+    hook_config.write_text("{generated_paths: ['custom/generated']}\n")
+    skill_note.write_text("Custom local skill notes.\n")
+
+    actions = init_repo.run_init(_args(tmp_path, hook=True, local_skill_notes=True))
+
+    assert "skip .agent-issues/pretool-hook.json5: custom content exists" in actions
+    assert "skip .agents/skills/solve-issue-local/SKILL.md: custom content exists" in actions
+    assert hook_config.read_text() == "{generated_paths: ['custom/generated']}\n"
+    assert skill_note.read_text() == "Custom local skill notes.\n"
+
+
+def test_optional_makefile_and_ci_snippets_are_generated(tmp_path: Path) -> None:
+    makefile = tmp_path / "Makefile"
+    makefile.write_text("test:\n\tpytest\n")
+
+    init_repo.run_init(_args(tmp_path, makefile_snippet=True, ci_snippet=True))
+
+    makefile_text = makefile.read_text()
+    assert "test:\n\tpytest\n" in makefile_text
+    assert "issue-fmt:" in makefile_text
+    ci_snippet = tmp_path / ".agent-issues/snippets/agent-issues-ci.yml"
+    assert init_repo.GENERATED_BEGIN in ci_snippet.read_text()
+    assert "issue-lint" in ci_snippet.read_text()
+
+
+def test_umbrella_init_dispatches_to_init_command(tmp_path: Path) -> None:
+    agent_issues.main(["init", "--agents", str(tmp_path)])
+
+    assert (tmp_path / "issues/.gitignore").exists()
+    assert "agent-issues" in (tmp_path / "AGENTS.md").read_text()
