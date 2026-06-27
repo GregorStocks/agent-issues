@@ -122,7 +122,7 @@ ensure_file "$HOOK_CONFIG" "644" '{
   // example "make generate" or "uv run tools/build-generated.py".
   generated_command: "the generator target",
 
-  // Human-readable description of the repo's issue tracker. This appears when
+  // Human-readable description of the repository issue tracker. This appears when
   // an agent tries to use gh issue commands.
   github_issue_guidance: "local JSON5 issue files in issues/",
 
