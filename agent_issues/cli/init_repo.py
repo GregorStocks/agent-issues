@@ -48,6 +48,21 @@ HOOK_CONFIG = f"""{JSON5_GENERATED_BEGIN}
 {JSON5_GENERATED_END}
 """
 
+SUBMIT_HOOK_CONFIG = f"""{JSON5_GENERATED_BEGIN}
+{{
+  // Commands run by agent-submit after basic clean-tree preflight and before
+  // pushing. Use prepare for repo-owned validation, regeneration, and committing
+  // intentional generated outputs.
+  prepare: [],
+
+  // Commands run after the branch is pushed and the PR is created or updated,
+  // before the CI/review watcher starts. Use after_publish for statuses or
+  // signoff steps that need the final pushed SHA.
+  after_publish: [],
+}}
+{JSON5_GENERATED_END}
+"""
+
 HOOK_SCRIPT = f"""#!/bin/sh
 {GENERATED_BEGIN}
 set -eu
@@ -100,6 +115,8 @@ already covered by the global `solve-issue` and `submit-pr` skills.
 ## Validation
 
 - Add this repository's test, lint, and formatting commands here.
+- If `.agent-issues/submit-hooks.json5` owns validation or generated artifact
+  commits, say that agents should rely on `agent-submit` for those steps.
 {GENERATED_END}
 """
 
@@ -119,6 +136,8 @@ constraints that are not already covered by the global `create-pr` and
 ## Validation
 
 - Add this repository's test, lint, and formatting commands here.
+- If `.agent-issues/submit-hooks.json5` owns validation or generated artifact
+  commits, say that agents should rely on `agent-submit` for those steps.
 {GENERATED_END}
 """
 
@@ -306,6 +325,11 @@ def run_init(args: argparse.Namespace) -> list[str]:
             mode=0o755,
         )
         bootstrapper.ensure_claude_settings_hook()
+    if args.all or args.submit_hooks:
+        bootstrapper.ensure_generated_file(
+            root / ".agent-issues/submit-hooks.json5",
+            SUBMIT_HOOK_CONFIG,
+        )
     if args.all or args.local_skill_notes:
         bootstrapper.ensure_generated_file(
             root / ".agents/skills/solve-issue-local/SKILL.md",
@@ -344,6 +368,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agents", action="store_true", help="add AGENTS.md guidance")
     parser.add_argument("--claude", action="store_true", help="add CLAUDE.md AGENTS include")
     parser.add_argument("--hook", action="store_true", help="add shared PreToolUse hook files")
+    parser.add_argument(
+        "--submit-hooks",
+        action="store_true",
+        help="add an agent-submit hook config template",
+    )
     parser.add_argument(
         "--local-skill-notes",
         action="store_true",

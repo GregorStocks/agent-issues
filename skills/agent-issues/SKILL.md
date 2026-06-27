@@ -136,6 +136,36 @@ raw `git push` plus manual `gh pr edit` as a substitute for normal PR updates.
 If CI fails or review feedback arrives, fix the root cause, commit, and submit
 again.
 
+## Submit Hooks
+
+Repos that need local automation on every PR submit can add
+`.agent-issues/submit-hooks.json5`:
+
+```json5
+{
+  prepare: ["make agent-submit-prepare"],
+  after_publish: ["make agent-submit-after-publish"],
+}
+```
+
+`agent-submit` runs `prepare` commands after its basic clean-tree preflight and
+before pushing. Use this phase for repo-owned validation, generated artifact
+refreshes, and commits of intentional generated diffs. A prepare hook may change
+HEAD by creating commits, but it must finish on the same branch with a clean
+working tree.
+
+`agent-submit` runs `after_publish` commands after pushing and creating or
+updating the PR, but before CI/review watching. Use this phase for signoff or
+status creation that needs the final pushed SHA. The hook receives
+`AGENT_SUBMIT_SHA`, `AGENT_SUBMIT_BRANCH`, `AGENT_SUBMIT_BASE`,
+`AGENT_SUBMIT_PR_NUMBER`, `AGENT_SUBMIT_PHASE`, and `AGENT_SUBMIT_REPO_ROOT`.
+An after-publish hook must not change branches, change HEAD, or leave a dirty
+working tree.
+
+Do not teach agents to bypass submit hooks with raw `git push`, `gh pr edit`,
+or direct signoff commands. Put the repo-specific automation behind hook
+commands and let agents use `agent-submit`.
+
 ## Local Skill Templates
 
 Repo-local skills should contain only the parts that are specific to that
@@ -163,6 +193,8 @@ Use these notes together with the global `create-pr` skill.
 - Before opening a PR, run `<repo test command>` and `<repo lint command>`.
 - If you change generated-output inputs, run `<regeneration command>` and
   commit intentional generated diffs.
+- If `.agent-issues/submit-hooks.json5` owns validation or generated artifact
+  commits, say that agents should rely on `agent-submit` for those steps.
 
 ## Repo-Specific Constraints
 
@@ -192,6 +224,8 @@ Use these notes together with the global `solve-issue` skill.
 - If you touch `<generated input path>`, run `<regeneration command>` and
   inspect the generated diff before committing it.
 - If a targeted check exists for the touched area, run it before the full suite.
+- If `.agent-issues/submit-hooks.json5` owns validation or generated artifact
+  commits, say that agents should rely on `agent-submit` for those steps.
 
 ## Repo-Specific Constraints
 
@@ -204,7 +238,8 @@ artifact commit hygiene, product/domain constraints, or project-specific review
 steps. They should not describe how to call `agent-submit`, how to update PR
 metadata, how to interpret watcher exit codes, how many CI/review loops to run,
 or whether to create GitHub Issues unless the repo deliberately overrides the
-shared policy.
+shared policy. They also should not tell agents to run direct signoff/status
+commands when submit hooks can own that automation.
 
 ## Temporary Files And Logs
 

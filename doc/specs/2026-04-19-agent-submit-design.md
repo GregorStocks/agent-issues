@@ -87,11 +87,23 @@ Code 10 is new and distinguishable from watcher outcomes.
 
 ### Steps
 
-1. **Push.** `git push origin HEAD`. If the branch has no upstream, add
+1. **Run submit hooks.** If `.agent-issues/submit-hooks.json5` exists, load
+   its optional `prepare` and `after_publish` command arrays.
+   - Run `prepare` commands after the clean-tree preflight and before pushing.
+     These commands may run validation, refresh generated artifacts, and commit
+     intentional generated diffs. They must finish on the same branch with a
+     clean working tree.
+   - After the push and PR create/update, run `after_publish` commands before
+     watcher startup. These commands receive `AGENT_SUBMIT_SHA`,
+     `AGENT_SUBMIT_BRANCH`, `AGENT_SUBMIT_BASE`, `AGENT_SUBMIT_PR_NUMBER`,
+     `AGENT_SUBMIT_PHASE`, and `AGENT_SUBMIT_REPO_ROOT`. They must not change
+     branches, change HEAD, or leave a dirty working tree.
+   - Hook command failures and invariant violations exit with code 10.
+2. **Push.** `git push origin HEAD`. If the branch has no upstream, add
    `-u`. If `git push` exits non-zero, `agent-submit` exits with that code
    (not remapped to 10 — this is a legitimate git error, not a preflight
-   violation) and does not proceed to steps 2 or 3.
-2. **Create or update PR.**
+   violation) and does not proceed to steps 3 or 4.
+3. **Create or update PR.**
    - Query `gh pr list --head <branch> --state open --json number` to find
      an existing open PR. If the query returns more than one open PR for
      the branch, abort with exit 10 (data violates the one-PR-per-branch
@@ -99,10 +111,10 @@ Code 10 is new and distinguishable from watcher outcomes.
    - If none: `gh pr create --base <base> --title ... --body ...`. Add
      `--draft` if the flag was passed. Capture the resulting PR number.
    - If one: `gh pr edit <num> --title ... --body ...`. Do not touch draft
-     state. Reuse `<num>` for step 3.
+     state. Reuse `<num>` for step 4.
    - Print the PR URL.
-3. **Watch.** Call the extracted `issue_watch_pr.run(pr=<num>)` in-process
-   with the PR number captured in step 2 (don't let the watcher re-query).
+4. **Watch.** Call the extracted `issue_watch_pr.run(pr=<num>)` in-process
+   with the PR number captured in step 3 (don't let the watcher re-query).
    Capture the exit code. Print the NEXT-STEP footer if non-zero. Exit
    with the watcher's code.
 

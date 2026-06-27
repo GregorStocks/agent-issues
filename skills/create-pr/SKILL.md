@@ -45,9 +45,9 @@ handling through `submit-pr` and `agent-submit`.
 
 4. **Format issues.** Run `issue-fmt` to auto-format issue files before validation.
 
-5. **Run pre-validation steps** from the local skill if it exists (e.g., regenerate stale test fixtures, build generated code). Skip this step if no local skill is present.
+5. **Run pre-validation steps** from the local skill if it exists (e.g., regenerate stale test fixtures, build generated code). Skip this step if no local skill is present or if the local skill says those steps are owned by `.agent-issues/submit-hooks.json5`.
 
-6. **Run the validation suite.** Consult the local `create-pr-local` skill for the specific commands. If no local skill exists, look for `Makefile` targets like `make check`, `make test`, or `make lint`. Fix any failures before proceeding. Do not create a PR with failing checks.
+6. **Run the validation suite.** Consult the local `create-pr-local` skill for the specific commands. If no local skill exists, look for `Makefile` targets like `make check`, `make test`, or `make lint`. Fix any failures before proceeding. Do not create a PR with failing checks. If repo validation is wired into `.agent-issues/submit-hooks.json5`, `agent-submit` will run it during the next step; do not duplicate long-running checks unless the local skill asks for an earlier targeted run.
 
    After validation, run `git status` again before pushing. Build and test commands can dirty tracked files. Commit intentional artifacts or clean incidental churn before you open the PR.
 
