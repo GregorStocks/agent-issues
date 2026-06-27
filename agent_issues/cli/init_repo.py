@@ -126,10 +126,10 @@ MAKEFILE_BLOCK = f"""{GENERATED_BEGIN}
 .PHONY: issue-fmt issue-lint
 
 issue-fmt:
-\tuv run issue-fmt
+\tissue-fmt
 
 issue-lint:
-\tuv run issue-lint
+\tissue-lint
 {GENERATED_END}
 """
 

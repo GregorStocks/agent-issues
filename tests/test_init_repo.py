@@ -169,6 +169,8 @@ def test_optional_makefile_and_ci_snippets_are_generated(tmp_path: Path) -> None
 
     makefile_text = (tmp_path / "Makefile").read_text()
     assert "issue-fmt:" in makefile_text
+    assert "\n\tissue-fmt\n" in makefile_text
+    assert "uv run issue-fmt" not in makefile_text
     ci_snippet = tmp_path / ".agent-issues/snippets/agent-issues-ci.yml"
     assert init_repo.GENERATED_BEGIN in ci_snippet.read_text()
     assert "issue-lint" in ci_snippet.read_text()
@@ -217,7 +219,7 @@ def test_makefile_snippet_skips_variable_defined_issue_targets(tmp_path: Path) -
 
 def test_makefile_snippet_skips_diverged_generated_block(tmp_path: Path) -> None:
     makefile = tmp_path / "Makefile"
-    makefile.write_text(init_repo.MAKEFILE_BLOCK.replace("uv run issue-fmt", "custom-format"))
+    makefile.write_text(init_repo.MAKEFILE_BLOCK.replace("\tissue-fmt", "\tcustom-format"))
 
     actions = init_repo.run_init(_args(tmp_path, makefile_snippet=True))
 
