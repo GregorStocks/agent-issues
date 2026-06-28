@@ -390,10 +390,19 @@ def _coerce_timeout_ms(value: object) -> int | None:
     return None
 
 
+def _timeout_field_ms(mapping: dict[str, Any]) -> int | None:
+    # Codex names the Bash/Shell timeout parameter "timeout_ms"; Claude Code
+    # names it "timeout" (also milliseconds). Accept either so the guardrail
+    # works across both harnesses.
+    for key in ("timeout_ms", "timeout"):
+        if (coerced := _coerce_timeout_ms(mapping.get(key))) is not None:
+            return coerced
+    return None
+
+
 def tool_timeout_ms(data: dict[str, Any]) -> int | None:
     tool_input = data.get("tool_input", {})
-    timeout = tool_input.get("timeout_ms") if isinstance(tool_input, dict) else None
-    if (coerced := _coerce_timeout_ms(timeout)) is not None:
+    if isinstance(tool_input, dict) and (coerced := _timeout_field_ms(tool_input)) is not None:
         return coerced
 
     transcript_path = data.get("transcript_path")
@@ -424,7 +433,7 @@ def _timeout_ms_from_transcript_lines(lines: deque[str], tool_use_id: str) -> in
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict):
-            return _coerce_timeout_ms(parsed.get("timeout_ms"))
+            return _timeout_field_ms(parsed)
     return None
 
 
