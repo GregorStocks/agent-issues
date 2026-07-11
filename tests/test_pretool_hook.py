@@ -195,6 +195,148 @@ def test_extracts_timeout_from_transcript(tmp_path: Path) -> None:
     assert pretool_hook.tool_timeout_ms(data) == 12345
 
 
+def test_extracts_nested_shell_timeout_from_in_flight_code_mode_call(
+    tmp_path: Path,
+) -> None:
+    command = "agent-submit --title T --body B"
+    source = (
+        'const result = await tools.shell_command({command: '
+        + json.dumps(command)
+        + ', timeout_ms: 4500000, workdir: "/repo"}); text(result)'
+    )
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "call_outer",
+                    "name": "exec",
+                    "input": source,
+                }
+            }
+        )
+        + "\n"
+    )
+    data = {
+        "transcript_path": str(transcript),
+        "tool_use_id": "exec-inner-id-not-in-transcript",
+        "tool_input": {"command": command},
+    }
+
+    assert pretool_hook.tool_timeout_ms(data, command) == 4_500_000
+
+
+def test_code_mode_timeout_matches_exact_nested_command(tmp_path: Path) -> None:
+    wanted_command = "agent-submit --title T --body B"
+    other_call = json.dumps({"command": "make test", "timeout_ms": 600_000})
+    wanted_call = json.dumps({"command": wanted_command, "timeout_ms": 4_500_000})
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "call_outer",
+                    "name": "exec",
+                    "input": (
+                        "const results = await Promise.all(["
+                        f"tools.shell_command({other_call}),"
+                        f"tools.shell_command({wanted_call})"
+                        "]);"
+                    ),
+                }
+            }
+        )
+        + "\n"
+    )
+    data = {
+        "transcript_path": str(transcript),
+        "tool_use_id": "exec-inner",
+        "tool_input": {},
+    }
+
+    assert pretool_hook.tool_timeout_ms(data, wanted_command) == 4_500_000
+    assert pretool_hook.tool_timeout_ms(data, "missing") is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'const args = {"command": "agent-submit", "timeout_ms": 4500000}; '
+        "tools.shell_command(args)",
+        "tools.shell_command({command: 'agent-submit', timeout_ms: 4500000})",
+        'tools.shell_command({command: "agent-submit", timeout_ms: 4500000,})',
+        'tools.shell_command({"command": "agent-submit", "timeout_ms": 4500000}); '
+        'tools.shell_command({"command": "agent-submit", "timeout_ms": 4500000})',
+    ],
+)
+def test_code_mode_timeout_fails_closed_for_unstructured_or_ambiguous_calls(
+    tmp_path: Path, source: str
+) -> None:
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        json.dumps(
+            {
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "call_outer",
+                    "name": "exec",
+                    "input": source,
+                }
+            }
+        )
+        + "\n"
+    )
+    data = {
+        "transcript_path": str(transcript),
+        "tool_use_id": "exec-inner",
+        "tool_input": {},
+    }
+
+    assert pretool_hook.tool_timeout_ms(data, "agent-submit") is None
+
+
+def test_code_mode_timeout_ignores_completed_outer_calls(tmp_path: Path) -> None:
+    command = "agent-submit --title T --body B"
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "payload": {
+                            "type": "custom_tool_call",
+                            "call_id": "call_old",
+                            "name": "exec",
+                            "input": "tools.shell_command("
+                            + json.dumps({"command": command, "timeout_ms": 4_500_000})
+                            + ")",
+                        }
+                    }
+                ),
+                json.dumps(
+                    {
+                        "payload": {
+                            "type": "custom_tool_call_output",
+                            "call_id": "call_old",
+                            "output": "done",
+                        }
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+    data = {
+        "transcript_path": str(transcript),
+        "tool_use_id": "exec-inner",
+        "tool_input": {},
+    }
+
+    assert pretool_hook.tool_timeout_ms(data, command) is None
+
+
 def test_evaluate_ignores_non_bash_tools() -> None:
     assert (
         pretool_hook.evaluate_hook_input(

@@ -400,7 +400,7 @@ def _timeout_field_ms(mapping: dict[str, Any]) -> int | None:
     return None
 
 
-def tool_timeout_ms(data: dict[str, Any]) -> int | None:
+def tool_timeout_ms(data: dict[str, Any], command: str | None = None) -> int | None:
     tool_input = data.get("tool_input", {})
     if isinstance(tool_input, dict) and (coerced := _timeout_field_ms(tool_input)) is not None:
         return coerced
@@ -411,18 +411,32 @@ def tool_timeout_ms(data: dict[str, Any]) -> int | None:
         return None
     try:
         with Path(transcript_path).open(encoding="utf-8") as handle:
-            return _timeout_ms_from_transcript_lines(deque(handle, maxlen=300), tool_use_id)
+            return _timeout_ms_from_transcript_lines(
+                deque(handle, maxlen=300),
+                tool_use_id,
+                command=command,
+            )
     except OSError:
         return None
 
 
-def _timeout_ms_from_transcript_lines(lines: deque[str], tool_use_id: str) -> int | None:
-    for line in reversed(lines):
+def _timeout_ms_from_transcript_lines(
+    lines: deque[str],
+    tool_use_id: str,
+    *,
+    command: str | None = None,
+) -> int | None:
+    parsed_events: list[dict[str, Any]] = []
+    for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
         payload = event.get("payload", event)
+        if isinstance(payload, dict):
+            parsed_events.append(payload)
+
+    for payload in reversed(parsed_events):
         if payload.get("call_id") != tool_use_id:
             continue
         arguments = payload.get("arguments")
@@ -434,7 +448,147 @@ def _timeout_ms_from_transcript_lines(lines: deque[str], tool_use_id: str) -> in
             continue
         if isinstance(parsed, dict):
             return _timeout_field_ms(parsed)
+
+    if command is None:
+        return None
+    return _code_mode_shell_timeout_ms(parsed_events, command)
+
+
+def _code_mode_shell_timeout_ms(
+    payloads: list[dict[str, Any]], command: str
+) -> int | None:
+    completed_call_ids = {
+        payload.get("call_id")
+        for payload in payloads
+        if payload.get("type") == "custom_tool_call_output"
+        and isinstance(payload.get("call_id"), str)
+    }
+
+    for payload in reversed(payloads):
+        if (
+            payload.get("type") != "custom_tool_call"
+            or payload.get("name") != "exec"
+            or payload.get("call_id") in completed_call_ids
+        ):
+            continue
+        source = payload.get("input")
+        if not isinstance(source, str):
+            continue
+        matching_calls = [
+            call for call in _code_mode_shell_calls(source) if call.get("command") == command
+        ]
+        if len(matching_calls) != 1:
+            return None
+        return _timeout_field_ms(matching_calls[0])
     return None
+
+
+def _code_mode_shell_calls(source: str) -> list[dict[str, Any]]:
+    marker = "tools.shell_command("
+    calls: list[dict[str, Any]] = []
+    search_from = 0
+
+    while (marker_at := source.find(marker, search_from)) != -1:
+        argument_at = marker_at + len(marker)
+        while argument_at < len(source) and source[argument_at].isspace():
+            argument_at += 1
+        decoded = _decode_code_mode_object(source, argument_at)
+        if decoded is None:
+            search_from = argument_at
+            continue
+        parsed, after_argument = decoded
+        while after_argument < len(source) and source[after_argument].isspace():
+            after_argument += 1
+        if after_argument < len(source) and source[after_argument] == ")":
+            calls.append(parsed)
+        search_from = max(after_argument, argument_at + 1)
+
+    return calls
+
+
+def _decode_code_mode_object(
+    source: str, object_at: int
+) -> tuple[dict[str, Any], int] | None:
+    if object_at >= len(source) or source[object_at] != "{":
+        return None
+
+    closing: list[str] = []
+    in_string = False
+    escaped = False
+    object_end: int | None = None
+    for index in range(object_at, len(source)):
+        character = source[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "{[":
+            closing.append("}" if character == "{" else "]")
+        elif character in "}]":
+            if not closing or closing.pop() != character:
+                return None
+            if not closing:
+                object_end = index + 1
+                break
+
+    if object_end is None:
+        return None
+    literal = _quote_js_identifier_keys(source[object_at:object_end])
+    try:
+        parsed = json.loads(literal)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed, object_end
+
+
+def _quote_js_identifier_keys(literal: str) -> str:
+    result: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(literal):
+        character = literal[index]
+        if in_string:
+            result.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+        if character == '"':
+            in_string = True
+            result.append(character)
+            index += 1
+            continue
+        if character.isalpha() or character in "_$":
+            token_end = index + 1
+            while token_end < len(literal) and (
+                literal[token_end].isalnum() or literal[token_end] in "_$"
+            ):
+                token_end += 1
+            colon_at = token_end
+            while colon_at < len(literal) and literal[colon_at].isspace():
+                colon_at += 1
+            previous = next((char for char in reversed(result) if not char.isspace()), None)
+            token = literal[index:token_end]
+            is_key = previous in {"{", ","} and literal[colon_at : colon_at + 1] == ":"
+            result.append(f'"{token}"' if is_key else token)
+            index = token_end
+            continue
+        result.append(character)
+        index += 1
+    return "".join(result)
 
 
 _GIT_GLOBAL_OPTS_WITH_ARG = {
@@ -978,4 +1132,4 @@ def evaluate_hook_input(data: dict[str, Any], config: HookConfig | None = None) 
     tool_name = data.get("tool_name")
     if isinstance(tool_name, str) and tool_name not in {"Bash", "Shell"}:
         return None
-    return rejection_message(command, config, timeout_ms=tool_timeout_ms(data))
+    return rejection_message(command, config, timeout_ms=tool_timeout_ms(data, command))
