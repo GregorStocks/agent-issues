@@ -62,7 +62,14 @@ loops, and timeout handling through `agent-submit`.
 
    - If the script **succeeds** (exit 0): immediately run `issue-claim --current` and treat the returned filename stem as the authoritative claimed issue for all later steps.
    - If you later merge the default branch and the claimed issue file was renamed (for example because issue filename prefixes changed), re-run `issue-claim --current` before continuing. The local claim key is stable across `blocked-...` / `pN-...` renames.
-   - If the script **fails with exit 2**: **stop immediately**. Tell the user no issue was claimed and do NOT proceed.
+   - If the script **fails with exit 2** because this worktree already holds a
+     different claim, inspect that current claim. If it is stale, run
+     `issue-abandon` without asking and retry the intended claim once. A claim
+     is clearly stale when the prior work is demonstrably complete, including
+     when step 0 proved the worktree is clean at the default branch with no open
+     PR after the prior task, or when the claimed issue was removed by a merged
+     PR. Releasing a stale claim is always authorized. If the claim may still
+     own active work, stop and tell the user instead of releasing it.
    - If the script **fails with exit 1** and the user explicitly passed an issue name: **stop immediately**. Tell the user no issue was claimed and do NOT proceed.
    - If the script **fails with exit 1** during auto-pick: do **not** stop yet. This means there is no unblocked, unclaimed issue currently available. Continue to step 3 and look for a blocked issue that can be unblocked and claimed.
 
@@ -82,7 +89,9 @@ loops, and timeout handling through `agent-submit`.
 
       - If that claim succeeds (exit 0): run `issue-claim --current` and treat that returned filename stem as authoritative for all later steps. Then immediately remove the `blocked` field, rename the file from `blocked-<name>.json5` to `p{priority}-<name>.json5`, commit that change on your branch, and continue. Stop scanning blocked issues.
       - If that claim fails with exit 1: another worktree got there first or the claim was otherwise lost. Continue to the next blocked issue and try again with a different one.
-      - If that claim fails with exit 2: **stop immediately** and tell the user.
+      - If that claim fails with exit 2, apply the stale-claim recovery rule
+        from step 2. Retry this blocked issue once after releasing a clearly
+        stale claim; otherwise stop and tell the user.
    4. If the blocker **is NOT resolved**: leave it blocked and continue to the next blocked issue
    5. If no blocked issue can be unblocked and claimed, **stop immediately** and tell the user no issue was claimed.
 
@@ -151,6 +160,11 @@ If you determine an issue isn't worth fixing after claiming it, run:
    ```
 
    This releases the local claim so another worktree can pick up the issue. See `/abandon-issue` for the full workflow including branch cleanup.
+
+Releasing a stale claim is different from abandoning active work and is always
+authorized without user confirmation. Use `issue-abandon` as bookkeeping, then
+continue the requested workflow; do not perform branch cleanup when the
+worktree is already clean and ready.
 
 Then restart from step 1 to pick a different issue.
 

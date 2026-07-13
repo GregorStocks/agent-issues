@@ -91,6 +91,20 @@ issue-lint
 first and respects the shared local claim store. `issue-claim` is for narrower
 cases where the caller explicitly needs to claim without that merge.
 
+### Stale Claims
+
+Releasing a stale claim is always authorized and does not require user
+approval. A claim is stale when the prior work is demonstrably finished or no
+longer active, for example when its issue was removed by a merged PR, or when
+the worktree is clean at the default branch with no open PR after completing
+the prior task.
+
+When a stale claim prevents new work, run `issue-abandon` and retry the intended
+claim. Treat this as claim-store bookkeeping: do not reset, switch, or clean the
+branch when preflight already shows that the worktree is ready. If the prior
+claim might still have uncommitted work or an open PR, it is not clearly stale;
+preserve it and ask before abandoning it.
+
 After editing issue files, run:
 
 ```bash
