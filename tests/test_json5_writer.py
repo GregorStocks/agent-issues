@@ -1,4 +1,4 @@
-"""Tests for sentence formatting and explicit legacy word wrapping."""
+"""Tests for sentence formatting and JSON5 value preservation."""
 
 import pyjson5
 
@@ -12,15 +12,12 @@ def _roundtrip(obj, **kwargs):
     return text, parsed
 
 
-# ---- basic behaviour (pre-existing) --------------------------------------
-
-
 def test_short_strings_unchanged():
     obj = {"title": "Short", "desc": "Also short"}
     text, parsed = _roundtrip(obj)
     assert parsed == obj
-    for line in text.split("\n"):
-        assert len(line) <= 80
+    assert '"title": "Short",' in text
+    assert '"desc": "Also short",' in text
 
 
 def test_trailing_commas():
@@ -35,10 +32,7 @@ def test_multiline_expansion():
     assert "\\n\\\n" in text  # \n followed by line continuation
 
 
-# ---- word-wrapping -------------------------------------------------------
-
-
-def test_long_string_gets_wrapped():
+def test_long_description_breaks_between_sentences():
     long_desc = (
         "When users try to log in with SSO credentials and their account "
         "has been deactivated, the system shows a generic error message "
@@ -46,78 +40,58 @@ def test_long_string_gets_wrapped():
         "impossible for users to understand why they cannot log in."
     )
     obj = {"description": long_desc}
-    text, parsed = _roundtrip(obj, wrap_width=80)
+    text, parsed = _roundtrip(obj)
     assert parsed == obj
-    for line in text.split("\n"):
-        assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
+    first, second = long_desc.split(" This")
+    assert first + " \\\nThis" + second in text
 
 
-def test_wrap_preserves_value():
-    """The wrapped output must parse back to the identical string."""
+def test_long_value_preserved():
+    """The formatted output must parse back to the identical string."""
     long_val = "word " * 100  # ~500 chars
     obj = {"key": long_val.strip()}
     text, parsed = _roundtrip(obj)
     assert parsed == obj
 
 
-def test_wrap_disabled_when_zero():
-    long_val = "word " * 50
-    obj = {"key": long_val.strip()}
-    text = dumps_json5(obj, wrap_width=0)
-    # Should be a single long line for the value.
-    value_lines = [l for l in text.split("\n") if "word" in l]
-    assert len(value_lines) == 1
-
-
-def test_wrap_with_multiline_string():
-    """A string with \\n AND long paragraphs should expand newlines AND wrap."""
+def test_multiline_string_keeps_long_paragraph():
+    """Expand explicit newlines while keeping each sentence on one source line."""
     para1 = "Short intro."
     para2 = "word " * 40  # ~200 chars
     obj = {"description": f"{para1}\n{para2.strip()}"}
-    text, parsed = _roundtrip(obj, wrap_width=80)
+    text, parsed = _roundtrip(obj)
     assert parsed == obj
-    for line in text.split("\n"):
-        assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
+    assert para1 + "\\n\\\n" + para2.strip() in text
 
 
-def test_wrap_long_first_paragraph_in_multiline_string():
-    """A multiline string whose first paragraph exceeds wrap_width must wrap."""
+def test_multiline_string_keeps_long_first_paragraph():
+    """Preserve a long first paragraph and its explicit newline."""
     para1 = "word " * 40  # ~200 chars – long first paragraph
     para2 = "Short second paragraph."
     obj = {"description": f"{para1.strip()}\n{para2}"}
-    text, parsed = _roundtrip(obj, wrap_width=80)
+    text, parsed = _roundtrip(obj)
     assert parsed == obj
-    for line in text.split("\n"):
-        assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
+    assert para1.strip() + "\\n\\\n" + para2 in text
 
 
-def test_no_wrap_when_no_spaces():
-    """A long string without spaces cannot be wrapped – must survive."""
+def test_long_string_without_spaces_preserved():
+    """Preserve a long string without spaces."""
     long_val = "x" * 200
     obj = {"key": long_val}
     text, parsed = _roundtrip(obj)
     assert parsed == obj  # value preserved even though line is long
 
 
-def test_wrap_respects_custom_width():
-    long_val = "word " * 50
-    obj = {"key": long_val.strip()}
-    text, parsed = _roundtrip(obj, wrap_width=60)
-    assert parsed == obj
-    for line in text.split("\n"):
-        assert len(line) <= 60, f"Line too long ({len(line)}): {line!r}"
-
-
-def test_wrap_with_escape_sequences():
-    """Escape sequences in strings must not be broken by wrapping."""
+def test_escape_sequences_preserved():
+    """Escape sequences in strings must not be broken by formatting."""
     val = 'She said \\"hello\\" and then ' + "word " * 30
     obj = {"key": val.strip()}
     text, parsed = _roundtrip(obj)
     assert parsed == obj
 
 
-def test_wrap_idempotent():
-    """Wrapping already-wrapped output should not change it."""
+def test_formatting_idempotent():
+    """Formatting already-formatted output should not change it."""
     long_val = "word " * 80
     obj = {"key": long_val.strip()}
     text1 = dumps_json5(obj)
