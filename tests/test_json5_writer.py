@@ -168,6 +168,7 @@ def test_unicode_sentence_starts(next_sentence, ensure_ascii):
         "~~Next sentence.~~",
         "`Next sentence.`",
         "[Next sentence](https://example.com).",
+        "![Next sentence](image.png).",
     ],
 )
 def test_markdown_sentence_boundaries(marked_sentence):
@@ -194,6 +195,9 @@ def test_markdown_sentence_boundaries(marked_sentence):
         ">     First sentence. Second sentence.",
         "> First sentence. Second sentence. | Other\n> --- | ---\n> Value | Other",
         "```text\n    ```\nFirst sentence. Second sentence.\n```",
+        "```text\n- ```\nFirst sentence. Second sentence.\n```",
+        "```text\n> ```\nFirst sentence. Second sentence.\n```",
+        "> ```text\n> - ```\n> First sentence. Second sentence.\n> ```",
     ],
 )
 def test_code_source_lines_preserved(code):

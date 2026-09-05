@@ -32,7 +32,7 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     Existing newlines remain authoritative boundaries.
     """
     boundary = re.compile(
-        r'''[.!?]["'”’)\]*_`~]* +(?=["'“‘(\[*_`~]*(?P<next>[^\W\d_]))'''
+        r'''[.!?]["'”’)\]*_`~]* +(?=["'“‘(\[*_`~!]*(?P<next>[^\W\d_]))'''
     )
     key_suffix = re.compile(r"\s*:")
     abbreviation = re.compile(
@@ -81,20 +81,38 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
     """Locate code and table rows whose source lines must survive."""
     blocks: list[tuple[int, int]] = []
     fence = None
+    fence_container = re.compile("")
     fence_start = 0
     offset = 0
     lines = value.splitlines(keepends=True)
     container = re.compile(r"^\s*(?:> ?|[-+*] +|\d+[.)] +)")
     table_separator = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
     contents = []
+    containers = []
     for line in lines:
         content = line.rstrip("\r\n")
+        prefix_patterns = []
         while prefix := container.match(content):
+            prefix_patterns.append(
+                r" {0,3}> ?" if prefix[0].lstrip().startswith(">")
+                else " " * len(prefix[0])
+            )
             content = content[prefix.end():]
         contents.append(content)
+        containers.append(re.compile("^" + "".join(prefix_patterns)))
     in_table = False
     for index, line in enumerate(lines):
         content = contents[index]
+        if fence is not None:
+            raw_content = line.rstrip("\r\n")
+            prefix = fence_container.match(raw_content)
+            if prefix:
+                content = raw_content[prefix.end():]
+            elif not raw_content.strip():
+                content = raw_content
+            else:
+                blocks.append((fence_start, offset))
+                fence = None
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", content)
         table_row = "|" in content and (
             in_table
@@ -114,6 +132,7 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
         elif marker:
             fence = marker[1]
             fence_start = offset
+            fence_container = containers[index]
         elif table_row or content.startswith(("    ", "\t")):
             blocks.append((offset, offset + len(line)))
         offset += len(line)
