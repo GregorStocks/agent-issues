@@ -1,6 +1,7 @@
 """Tests for sentence formatting and JSON5 value preservation."""
 
 import pyjson5
+import pytest
 
 from agent_issues.json5_writer import dumps_json5
 
@@ -124,3 +125,21 @@ def test_default_keeps_long_sentence_on_one_line():
     text, parsed = _roundtrip({"description": sentence})
     assert parsed == {"description": sentence}
     assert sentence in text
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "Use the U.S. Army mirror.",
+        "Ask Dr. Smith for help.",
+        "Ask J. R. Smith for help.",
+        "Try another platform, e.g. Linux.",
+        "See Fig. A for details.",
+    ],
+)
+def test_abbreviations_and_initials_stay_with_their_sentence(sentence):
+    obj = {"description": sentence + " Another sentence."}
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    assert sentence + " \\\nAnother sentence." in text
+    assert dumps_json5(parsed) == text

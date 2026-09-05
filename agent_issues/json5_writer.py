@@ -33,6 +33,10 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     """
     boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*[A-Z])''')
     key_suffix = re.compile(r"\s*:")
+    abbreviation = re.compile(
+        r"\b(?:[a-z]|mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|fig|no|vol|inc|ltd)\.$",
+        re.IGNORECASE,
+    )
 
     def split_value(match: re.Match) -> str:
         if key_suffix.match(text, match.end()):
@@ -41,6 +45,12 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
         chunks = []
         start = 0
         for sentence in boundary.finditer(value):
+            # A single initial also covers the final letter of U.S. or e.g.
+            punctuation_end = sentence.start() + 1
+            if abbreviation.search(
+                value, max(0, punctuation_end - 16), punctuation_end
+            ):
+                continue
             end = sentence.end()
             chunks.append(json.dumps(value[start:end], ensure_ascii=ensure_ascii)[1:-1])
             start = end
