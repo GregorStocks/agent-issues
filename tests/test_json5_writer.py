@@ -176,3 +176,23 @@ def test_markdown_sentence_boundaries(marked_sentence):
     assert parsed == obj
     assert "First sentence. \\\n" + marked_sentence + " \\\nLast sentence." in text
     assert dumps_json5(parsed) == text
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "`First sentence. Second sentence.`",
+        "``First ` sentence. Second sentence.``",
+        "```text\nFirst sentence. Second sentence.\n```",
+        "~~~~text\nFirst sentence. Second sentence.\n~~~~",
+        "```text\nFirst sentence. Second sentence.",
+        "    First sentence. Second sentence.\n",
+    ],
+)
+def test_code_source_lines_preserved(code):
+    obj = {"description": "Intro sentence. More prose.\n\n" + code}
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    assert "Intro sentence. \\\nMore prose." in text
+    assert "sentence. Second sentence." in text
+    assert dumps_json5(parsed) == text

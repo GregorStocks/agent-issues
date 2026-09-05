@@ -47,9 +47,19 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
         if key_suffix.match(text, match.end()):
             return match.group()  # Never split object keys.
         value = json.loads(match.group())
+        code_ranges = iter(_markdown_code_ranges(value))
+        code_range = next(code_ranges, None)
         chunks = []
         start = 0
         for sentence in boundary.finditer(value):
+            while code_range is not None and code_range[1] <= sentence.start():
+                code_range = next(code_ranges, None)
+            if (
+                code_range is not None
+                and code_range[0] <= sentence.start()
+                and sentence.end() <= code_range[1]
+            ):
+                continue
             if not sentence.group("next").isupper():
                 continue
             # A single initial also covers the final letter of U.S. or e.g.
@@ -65,6 +75,44 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
         return '"' + "\\\n".join(chunks) + '"'
 
     return re.sub(r'"(?:[^"\\]|\\.)*"', split_value, text)
+
+
+def _markdown_code_ranges(value: str) -> list[tuple[int, int]]:
+    """Locate fenced, indented, and inline code whose source lines must survive."""
+    blocks: list[tuple[int, int]] = []
+    fence = None
+    fence_start = 0
+    offset = 0
+    for line in value.splitlines(keepends=True):
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
+        if fence is not None:
+            if (
+                marker
+                and marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not marker[2].strip()
+            ):
+                blocks.append((fence_start, offset + len(line)))
+                fence = None
+        elif marker:
+            fence = marker[1]
+            fence_start = offset
+        elif line.startswith(("    ", "\t")):
+            blocks.append((offset, offset + len(line)))
+        offset += len(line)
+    if fence is not None:
+        blocks.append((fence_start, len(value)))
+
+    # Match equal-length backtick runs only outside the block ranges.
+    inline = re.compile(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    for start, end in blocks:
+        ranges.extend(match.span() for match in inline.finditer(value, offset, start))
+        ranges.append((start, end))
+        offset = end
+    ranges.extend(match.span() for match in inline.finditer(value, offset))
+    return ranges
 
 
 def _add_trailing_commas(text: str) -> str:
