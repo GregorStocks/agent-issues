@@ -14,11 +14,9 @@ def dumps_json5(
 ) -> str:
     """Serialize to JSON5 with multi-line strings and trailing commas.
 
-    Strings containing newlines are split at \\n boundaries using JSON5 line
-    continuations so each logical line appears on its own file line.
+    Strings containing newlines are split at \\n boundaries using JSON5 line continuations so each logical line appears on its own file line.
     By default, string values break at sentence boundaries without a width limit.
-    Set *wrap_width* to a positive number for legacy word wrapping, or 0 to
-    disable automatic breaks.
+    Set *wrap_width* to a positive number for legacy word wrapping, or 0 to disable automatic breaks.
     """
     text = json.dumps(
         obj, indent=indent, sort_keys=sort_keys, ensure_ascii=ensure_ascii
@@ -35,8 +33,7 @@ def dumps_json5(
 def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     """Insert continuations after sentence punctuation without changing values.
 
-    Sentence detection is deliberately conservative: punctuation followed by
-    spaces and a capital letter, optionally surrounded by closing/opening quotes.
+    Sentence detection is deliberately conservative: punctuation followed by spaces and a capital letter, optionally surrounded by closing/opening quotes.
     Existing newlines remain authoritative boundaries.
     """
     boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*[A-Z])''')
