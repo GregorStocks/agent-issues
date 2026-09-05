@@ -86,16 +86,20 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
     lines = value.splitlines(keepends=True)
     container = re.compile(r"^\s*(?:> ?|[-+*] +|\d+[.)] +)")
     table_separator = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
-    in_table = False
-    for index, line in enumerate(lines):
+    contents = []
+    for line in lines:
         content = line.rstrip("\r\n")
         while prefix := container.match(content):
             content = content[prefix.end():]
-        marker = re.match(r"^\s*(`{3,}|~{3,})(.*)$", content)
+        contents.append(content)
+    in_table = False
+    for index, line in enumerate(lines):
+        content = contents[index]
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", content)
         table_row = "|" in content and (
             in_table
             or content.lstrip().startswith("|")
-            or (index + 1 < len(lines) and table_separator.match(lines[index + 1]))
+            or (index + 1 < len(contents) and table_separator.match(contents[index + 1]))
         )
         in_table = bool(table_row)
         if fence is not None:
@@ -110,7 +114,7 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
         elif marker:
             fence = marker[1]
             fence_start = offset
-        elif table_row or line.startswith(("    ", "\t")):
+        elif table_row or content.startswith(("    ", "\t")):
             blocks.append((offset, offset + len(line)))
         offset += len(line)
     if fence is not None:

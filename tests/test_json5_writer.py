@@ -191,6 +191,9 @@ def test_markdown_sentence_boundaries(marked_sentence):
         "> ```text\n> First sentence. Second sentence.\n> ```",
         "| First sentence. Second sentence. | value |",
         "Header | Other\n--- | ---\nFirst sentence. Second sentence. | value",
+        ">     First sentence. Second sentence.",
+        "> First sentence. Second sentence. | Other\n> --- | ---\n> Value | Other",
+        "```text\n    ```\nFirst sentence. Second sentence.\n```",
     ],
 )
 def test_code_source_lines_preserved(code):
