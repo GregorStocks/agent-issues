@@ -10,23 +10,51 @@ def dumps_json5(
     indent: int = 2,
     sort_keys: bool = False,
     ensure_ascii: bool = False,
-    wrap_width: int = 80,
+    wrap_width: int | None = None,
 ) -> str:
     """Serialize to JSON5 with multi-line strings and trailing commas.
 
     Strings containing newlines are split at \\n boundaries using JSON5 line
-    continuations so each logical line appears on its own file line.  Long
-    string values are word-wrapped using line continuations to stay within
-    *wrap_width* columns (set to 0 to disable wrapping).
+    continuations so each logical line appears on its own file line.
+    By default, string values break at sentence boundaries without a width limit.
+    Set *wrap_width* to a positive number for legacy word wrapping, or 0 to
+    disable automatic breaks.
     """
     text = json.dumps(
         obj, indent=indent, sort_keys=sort_keys, ensure_ascii=ensure_ascii
     )
     text = _add_trailing_commas(text)
+    if wrap_width is None:
+        text = _split_sentence_strings(text, ensure_ascii=ensure_ascii)
     text = _expand_multiline_strings(text)
     if wrap_width:
         text = _wrap_long_lines(text, wrap_width)
     return text
+
+
+def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
+    """Insert continuations after sentence punctuation without changing values.
+
+    Sentence detection is deliberately conservative: punctuation followed by
+    spaces and a capital letter, optionally surrounded by closing/opening quotes.
+    Existing newlines remain authoritative boundaries.
+    """
+    boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*[A-Z])''')
+
+    def split_value(match: re.Match) -> str:
+        if text[match.end():].lstrip().startswith(":"):
+            return match.group()  # Never split object keys.
+        value = json.loads(match.group())
+        chunks = []
+        start = 0
+        for sentence in boundary.finditer(value):
+            end = sentence.end()
+            chunks.append(json.dumps(value[start:end], ensure_ascii=ensure_ascii)[1:-1])
+            start = end
+        chunks.append(json.dumps(value[start:], ensure_ascii=ensure_ascii)[1:-1])
+        return '"' + "\\\n".join(chunks) + '"'
+
+    return re.sub(r'"(?:[^"\\]|\\.)*"', split_value, text)
 
 
 def _add_trailing_commas(text: str) -> str:

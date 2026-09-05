@@ -1,4 +1,4 @@
-"""Tests for agent_issues.json5_writer – especially word-wrapping."""
+"""Tests for sentence formatting and explicit legacy word wrapping."""
 
 import pyjson5
 
@@ -46,7 +46,7 @@ def test_long_string_gets_wrapped():
         "impossible for users to understand why they cannot log in."
     )
     obj = {"description": long_desc}
-    text, parsed = _roundtrip(obj)
+    text, parsed = _roundtrip(obj, wrap_width=80)
     assert parsed == obj
     for line in text.split("\n"):
         assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
@@ -74,7 +74,7 @@ def test_wrap_with_multiline_string():
     para1 = "Short intro."
     para2 = "word " * 40  # ~200 chars
     obj = {"description": f"{para1}\n{para2.strip()}"}
-    text, parsed = _roundtrip(obj)
+    text, parsed = _roundtrip(obj, wrap_width=80)
     assert parsed == obj
     for line in text.split("\n"):
         assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
@@ -85,7 +85,7 @@ def test_wrap_long_first_paragraph_in_multiline_string():
     para1 = "word " * 40  # ~200 chars – long first paragraph
     para2 = "Short second paragraph."
     obj = {"description": f"{para1.strip()}\n{para2}"}
-    text, parsed = _roundtrip(obj)
+    text, parsed = _roundtrip(obj, wrap_width=80)
     assert parsed == obj
     for line in text.split("\n"):
         assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
@@ -124,3 +124,29 @@ def test_wrap_idempotent():
     parsed1 = pyjson5.loads(text1)
     text2 = dumps_json5(parsed1)
     assert text1 == text2
+
+
+def test_sentence_breaks_preserve_escapes_whitespace_and_paragraphs():
+    obj = {
+        "A key. With sentences.": (
+            'First sentence.  "Quoted sentence!" Next one? Yes.\n\n'
+            'A path C:\\notes and literal \\n. Final sentence.'
+        ),
+        "items": ["One sentence. Another sentence.", "Version 1.2 stays intact."],
+    }
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    assert '"A key. With sentences.":' in text
+    assert 'First sentence.  \\\n' in text
+    assert 'sentence!\\" \\\nNext one? \\\nYes.' in text
+    assert 'One sentence. \\\nAnother sentence.' in text
+    assert "Version 1.2 stays intact." in text
+    assert "\\n\\\n\\n\\\n" in text
+    assert dumps_json5(parsed) == text
+
+
+def test_default_keeps_long_sentence_on_one_line():
+    sentence = "A sentence with " + "many words " * 40 + "ends here."
+    text, parsed = _roundtrip({"description": sentence})
+    assert parsed == {"description": sentence}
+    assert sentence in text

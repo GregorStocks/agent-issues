@@ -1,4 +1,4 @@
-"""Reformat issue JSON5 files for consistent style and line width."""
+"""Reformat issue JSON5 files with one sentence per source line."""
 
 import sys
 from pathlib import Path

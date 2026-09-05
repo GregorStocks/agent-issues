@@ -8,6 +8,11 @@ Resolved issues should be deleted, not marked as resolved/closed.
 
 ## Format
 
+Write prose with one sentence per source line, without a fixed column limit.
+Preserve paragraph breaks, lists, and code blocks.
+Run `issue-fmt` to format JSON5 strings with line continuations at sentence boundaries while preserving their exact values.
+The formatter recognizes sentence punctuation followed by spaces and a capital letter, optionally with surrounding quotes or parentheses; ambiguous prose may need explicit newlines.
+
 ```json5
 {
   "title": "Short summary of the issue",
