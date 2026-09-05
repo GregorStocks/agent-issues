@@ -187,6 +187,10 @@ def test_markdown_sentence_boundaries(marked_sentence):
         "~~~~text\nFirst sentence. Second sentence.\n~~~~",
         "```text\nFirst sentence. Second sentence.",
         "    First sentence. Second sentence.\n",
+        "- ```text\n  First sentence. Second sentence.\n  ```",
+        "> ```text\n> First sentence. Second sentence.\n> ```",
+        "| First sentence. Second sentence. | value |",
+        "Header | Other\n--- | ---\nFirst sentence. Second sentence. | value",
     ],
 )
 def test_code_source_lines_preserved(code):
@@ -195,4 +199,12 @@ def test_code_source_lines_preserved(code):
     assert parsed == obj
     assert "Intro sentence. \\\nMore prose." in text
     assert "sentence. Second sentence." in text
+    assert dumps_json5(parsed) == text
+
+
+def test_escaped_backticks_do_not_suppress_sentence_breaks():
+    obj = {"description": r"Literal \` marker. Next sentence. Another \` marker."}
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    assert "marker. \\\nNext sentence. \\\nAnother" in text
     assert dumps_json5(parsed) == text

@@ -47,7 +47,7 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
         if key_suffix.match(text, match.end()):
             return match.group()  # Never split object keys.
         value = json.loads(match.group())
-        code_ranges = iter(_markdown_code_ranges(value))
+        code_ranges = iter(_markdown_literal_ranges(value))
         code_range = next(code_ranges, None)
         chunks = []
         start = 0
@@ -77,14 +77,27 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     return re.sub(r'"(?:[^"\\]|\\.)*"', split_value, text)
 
 
-def _markdown_code_ranges(value: str) -> list[tuple[int, int]]:
-    """Locate fenced, indented, and inline code whose source lines must survive."""
+def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
+    """Locate code and table rows whose source lines must survive."""
     blocks: list[tuple[int, int]] = []
     fence = None
     fence_start = 0
     offset = 0
-    for line in value.splitlines(keepends=True):
-        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
+    lines = value.splitlines(keepends=True)
+    container = re.compile(r"^\s*(?:> ?|[-+*] +|\d+[.)] +)")
+    table_separator = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
+    in_table = False
+    for index, line in enumerate(lines):
+        content = line.rstrip("\r\n")
+        while prefix := container.match(content):
+            content = content[prefix.end():]
+        marker = re.match(r"^\s*(`{3,}|~{3,})(.*)$", content)
+        table_row = "|" in content and (
+            in_table
+            or content.lstrip().startswith("|")
+            or (index + 1 < len(lines) and table_separator.match(lines[index + 1]))
+        )
+        in_table = bool(table_row)
         if fence is not None:
             if (
                 marker
@@ -97,21 +110,46 @@ def _markdown_code_ranges(value: str) -> list[tuple[int, int]]:
         elif marker:
             fence = marker[1]
             fence_start = offset
-        elif line.startswith(("    ", "\t")):
+        elif table_row or line.startswith(("    ", "\t")):
             blocks.append((offset, offset + len(line)))
         offset += len(line)
     if fence is not None:
         blocks.append((fence_start, len(value)))
 
     # Match equal-length backtick runs only outside the block ranges.
-    inline = re.compile(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
     ranges: list[tuple[int, int]] = []
     offset = 0
     for start, end in blocks:
-        ranges.extend(match.span() for match in inline.finditer(value, offset, start))
+        ranges.extend(_inline_code_ranges(value, offset, start))
         ranges.append((start, end))
         offset = end
-    ranges.extend(match.span() for match in inline.finditer(value, offset))
+    ranges.extend(_inline_code_ranges(value, offset, len(value)))
+    return ranges
+
+
+def _inline_code_ranges(value: str, start: int, end: int) -> list[tuple[int, int]]:
+    """Match code delimiters, ignoring backslash-escaped opening backticks."""
+    runs = list(re.finditer(r"`+", value[start:end]))
+    next_by_length: dict[int, int] = {}
+    closing: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        length = len(runs[index][0])
+        if length in next_by_length:
+            closing[index] = next_by_length[length]
+        next_by_length[length] = index
+    ranges = []
+    index = 0
+    while index < len(runs):
+        position = start + runs[index].start()
+        backslashes = 0
+        while position - backslashes > start and value[position - backslashes - 1] == "\\":
+            backslashes += 1
+        if backslashes % 2 or index not in closing:
+            index += 1
+            continue
+        last = closing[index]
+        ranges.append((position, start + runs[last].end()))
+        index = last + 1
     return ranges
 
 
