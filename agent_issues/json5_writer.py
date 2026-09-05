@@ -32,9 +32,10 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     Existing newlines remain authoritative boundaries.
     """
     boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*[A-Z])''')
+    key_suffix = re.compile(r"\s*:")
 
     def split_value(match: re.Match) -> str:
-        if text[match.end():].lstrip().startswith(":"):
+        if key_suffix.match(text, match.end()):
             return match.group()  # Never split object keys.
         value = json.loads(match.group())
         chunks = []
