@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from agent_issues.cli import issue_fmt
-from agent_issues.json5_utils import dumps_json5
+from agent_issues.json5_utils import dumps_json5, loads_json5
 
 
 def _make_valid_issue() -> dict:
@@ -24,14 +24,16 @@ def test_fmt_rewrites_long_description(tmp_path: Path) -> None:
     issues_dir = tmp_path / "issues"
     issues_dir.mkdir()
     issue = _make_valid_issue()
-    issue["description"] = "word " * 200
+    first_sentence = "A sentence with " + "word " * 200 + "ends here."
+    issue["description"] = first_sentence + " Another sentence."
     path = issues_dir / "p2-long-desc.json5"
     # Write with plain json (no wrapping).
     path.write_text(json.dumps(issue, indent=2))
     assert issue_fmt.fmt_issue(path) is True
-    # After formatting, no line should exceed 80 chars.
-    for line in path.read_text().split("\n"):
-        assert len(line) <= 80, f"Line too long ({len(line)}): {line!r}"
+    text = path.read_text()
+    assert first_sentence + " \\\nAnother sentence." in text
+    assert loads_json5(text) == issue
+    assert issue_fmt.fmt_issue(path) is False
 
 
 def test_fmt_is_idempotent(tmp_path: Path) -> None:

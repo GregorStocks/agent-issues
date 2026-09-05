@@ -10,23 +10,175 @@ def dumps_json5(
     indent: int = 2,
     sort_keys: bool = False,
     ensure_ascii: bool = False,
-    wrap_width: int = 80,
 ) -> str:
     """Serialize to JSON5 with multi-line strings and trailing commas.
 
-    Strings containing newlines are split at \\n boundaries using JSON5 line
-    continuations so each logical line appears on its own file line.  Long
-    string values are word-wrapped using line continuations to stay within
-    *wrap_width* columns (set to 0 to disable wrapping).
+    Strings containing newlines are split at \\n boundaries using JSON5 line continuations so each logical line appears on its own file line.
+    String values break at sentence boundaries without a width limit.
     """
     text = json.dumps(
         obj, indent=indent, sort_keys=sort_keys, ensure_ascii=ensure_ascii
     )
     text = _add_trailing_commas(text)
+    text = _split_sentence_strings(text, ensure_ascii=ensure_ascii)
     text = _expand_multiline_strings(text)
-    if wrap_width:
-        text = _wrap_long_lines(text, wrap_width)
     return text
+
+
+def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
+    """Insert continuations after sentence punctuation without changing values.
+
+    Sentence detection is deliberately conservative: punctuation followed by spaces and a capital letter, optionally surrounded by closing/opening quotes.
+    Existing newlines remain authoritative boundaries.
+    """
+    boundary = re.compile(
+        r'''[.!?]["'”’)\]*_`~]* +(?=["'“‘(\[*_`~!]*(?P<next>[^\W\d_]))'''
+    )
+    key_suffix = re.compile(r"\s*:")
+    abbreviation = re.compile(
+        r"\b(?:[^\W\d_]|mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|fig|no|vol|inc|ltd|"
+        r"dept|univ|assn|corp|co|approx|est|ref|refs|eq|eqs|figs|vols|pp|"
+        r"rev|hon|gov|sen|rep|gen|col|maj|capt|lt|sgt|supt|"
+        r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.$",
+        re.IGNORECASE,
+    )
+
+    def split_value(match: re.Match) -> str:
+        if key_suffix.match(text, match.end()):
+            return match.group()  # Never split object keys.
+        value = json.loads(match.group())
+        code_ranges = iter(_markdown_literal_ranges(value))
+        code_range = next(code_ranges, None)
+        chunks = []
+        start = 0
+        for sentence in boundary.finditer(value):
+            while code_range is not None and code_range[1] <= sentence.start():
+                code_range = next(code_ranges, None)
+            if (
+                code_range is not None
+                and code_range[0] <= sentence.start()
+                and sentence.end() <= code_range[1]
+            ):
+                continue
+            if not sentence.group("next").isupper():
+                continue
+            # A single initial also covers the final letter of U.S. or e.g.
+            punctuation_end = sentence.start() + 1
+            if abbreviation.search(
+                value, max(0, punctuation_end - 16), punctuation_end
+            ):
+                continue
+            end = sentence.end()
+            chunks.append(json.dumps(value[start:end], ensure_ascii=ensure_ascii)[1:-1])
+            start = end
+        chunks.append(json.dumps(value[start:], ensure_ascii=ensure_ascii)[1:-1])
+        return '"' + "\\\n".join(chunks) + '"'
+
+    return re.sub(r'"(?:[^"\\]|\\.)*"', split_value, text)
+
+
+def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
+    """Locate code and table rows whose source lines must survive."""
+    blocks: list[tuple[int, int]] = []
+    fence = None
+    fence_container = re.compile("")
+    fence_start = 0
+    offset = 0
+    lines = value.splitlines(keepends=True)
+    container = re.compile(r"^\s*(?:> ?|[-+*] +|\d+[.)] +)")
+    table_separator = re.compile(r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$")
+    contents = []
+    containers = []
+    for line in lines:
+        content = line.rstrip("\r\n")
+        prefix_patterns = []
+        while prefix := container.match(content):
+            prefix_patterns.append(
+                r" {0,3}> ?" if prefix[0].lstrip().startswith(">")
+                else " " * len(prefix[0])
+            )
+            content = content[prefix.end():]
+        contents.append(content)
+        containers.append(re.compile("^" + "".join(prefix_patterns)))
+    in_table = False
+    for index, line in enumerate(lines):
+        content = contents[index]
+        if fence is not None:
+            raw_content = line.rstrip("\r\n")
+            prefix = fence_container.match(raw_content)
+            if prefix:
+                content = raw_content[prefix.end():]
+            elif not raw_content.strip() and ">" not in fence_container.pattern:
+                content = raw_content
+            else:
+                blocks.append((fence_start, offset))
+                fence = None
+        marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", content)
+        table_row = "|" in content and (
+            in_table
+            or content.lstrip().startswith("|")
+            or (index + 1 < len(contents) and table_separator.match(contents[index + 1]))
+        )
+        in_table = bool(table_row)
+        if fence is not None:
+            if (
+                marker
+                and marker[1][0] == fence[0]
+                and len(marker[1]) >= len(fence)
+                and not marker[2].strip()
+            ):
+                blocks.append((fence_start, offset + len(line)))
+                fence = None
+        elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
+            fence = marker[1]
+            fence_start = offset
+            fence_container = containers[index]
+        elif table_row or content.startswith(("    ", "\t")):
+            blocks.append((offset, offset + len(line)))
+        offset += len(line)
+    if fence is not None:
+        blocks.append((fence_start, len(value)))
+
+    # Match equal-length backtick runs only outside the block ranges.
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    for start, end in blocks:
+        ranges.extend(_inline_code_ranges(value, offset, start))
+        ranges.append((start, end))
+        offset = end
+    ranges.extend(_inline_code_ranges(value, offset, len(value)))
+    return ranges
+
+
+def _inline_code_ranges(value: str, start: int, end: int) -> list[tuple[int, int]]:
+    """Match code delimiters, ignoring backslash-escaped opening backticks."""
+    runs = list(re.finditer(r"`+", value[start:end]))
+    openings = []
+    for run in runs:
+        position = start + run.start()
+        backslashes = 0
+        while position - backslashes > start and value[position - backslashes - 1] == "\\":
+            backslashes += 1
+        escaped = backslashes % 2
+        openings.append((position + escaped, len(run[0]) - escaped))
+    next_by_length: dict[int, int] = {}
+    closing: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        length = openings[index][1]
+        if length in next_by_length:
+            closing[index] = next_by_length[length]
+        next_by_length[len(runs[index][0])] = index
+    ranges = []
+    index = 0
+    while index < len(runs):
+        position = openings[index][0]
+        if index not in closing:
+            index += 1
+            continue
+        last = closing[index]
+        ranges.append((position, start + runs[last].end()))
+        index = last + 1
+    return ranges
 
 
 def _add_trailing_commas(text: str) -> str:
@@ -65,141 +217,3 @@ def _expand_multiline_strings(text: str) -> str:
         result.append(ch)
         i += 1
     return "".join(result)
-
-
-# ---------------------------------------------------------------------------
-# Word-wrapping long string values
-# ---------------------------------------------------------------------------
-
-# Key-value pair whose value is a complete single-line string:
-#   <indent>"<key>": "<value>"[,]
-_KV_STRING_RE = re.compile(
-    r'^(\s*"(?:[^"\\]|\\.)*":\s*")'  # prefix – indent + key + ': "'
-    r"((?:[^\"\\]|\\.)*)"  # content – string body
-    r'("(?:,?)\s*)$',  # suffix – closing quote [+ comma]
-)
-
-# Continuation line ending with \n\ (multiline-expanded paragraph boundary).
-_CONT_NL_RE = re.compile(
-    r"^()"  # empty prefix
-    r"(.*)"  # content (greedy)
-    r"(\\n\\)$",  # suffix – \n\
-)
-
-# Last continuation line closing the string: content followed by "[,].
-_CONT_END_RE = re.compile(
-    r"^()"  # empty prefix
-    r'((?:[^"\\]|\\.)*)'  # content (no unescaped quotes)
-    r'("(?:,?)\s*)$',  # suffix – "[,]
-)
-
-# Key-value pair whose string value continues on the next line:
-#   <indent>"<key>": "<content>\n\
-_KV_STRING_CONT_RE = re.compile(
-    r'^(\s*"(?:[^"\\]|\\.)*":\s*")'  # prefix – indent + key + ': "'
-    r"(.*)"  # content – string body (greedy, backtracks for suffix)
-    r"(\\n\\)$",  # suffix – \n\ (paragraph break continuation)
-)
-
-
-def _wrap_long_lines(text: str, width: int) -> str:
-    """Wrap long string-value lines using JSON5 line continuations."""
-    lines = text.split("\n")
-    result: list[str] = []
-    in_string = False
-
-    for line in lines:
-        if len(line) <= width:
-            result.append(line)
-        elif in_string:
-            result.extend(_wrap_continuation(line, width))
-        else:
-            result.extend(_wrap_kv_string(line, width))
-
-        # A line ending with \ means the string continues on the next line.
-        last = result[-1] if result else ""
-        in_string = last.endswith("\\")
-
-    return "\n".join(result)
-
-
-def _wrap_kv_string(line: str, width: int) -> list[str]:
-    """Wrap a key-value line whose value is a long string."""
-    m = _KV_STRING_RE.match(line)
-    if not m:
-        m = _KV_STRING_CONT_RE.match(line)
-    if not m:
-        return [line]
-    return _wrap_matched(m, width)
-
-
-def _wrap_continuation(line: str, width: int) -> list[str]:
-    """Wrap a continuation line inside a multiline string."""
-    m = _CONT_NL_RE.match(line)
-    if not m:
-        m = _CONT_END_RE.match(line)
-    if not m:
-        return [line]
-    return _wrap_matched(m, width)
-
-
-def _wrap_matched(m: re.Match, width: int) -> list[str]:
-    """Given a regex match with (prefix, content, suffix), word-wrap content."""
-    prefix = m.group(1)
-    content = m.group(2)
-    suffix = m.group(3)
-
-    chunks = _split_at_spaces(content, width, len(prefix), len(suffix))
-    if len(chunks) <= 1:
-        return [prefix + content + suffix]
-
-    out = [prefix + chunks[0] + "\\"]
-    for chunk in chunks[1:-1]:
-        out.append(chunk + "\\")
-    out.append(chunks[-1] + suffix)
-    return out
-
-
-def _split_at_spaces(
-    text: str, width: int, prefix_len: int, suffix_len: int
-) -> list[str]:
-    """Split *text* at word boundaries so every output line fits in *width*.
-
-    The first chunk shares a line with *prefix_len* leading characters.
-    The last chunk shares a line with *suffix_len* trailing characters.
-    Every non-last line carries a trailing ``\\`` (1 char) for the JSON5 line
-    continuation.
-    """
-    # Budget for the first chunk: prefix + chunk + '\'
-    first_avail = max(width - prefix_len - 1, 10)
-    # Subsequent chunks start at column 0: chunk + '\'
-    cont_avail = max(width - 1, 10)
-
-    chunks: list[str] = []
-    remaining = text
-    avail = first_avail
-
-    while remaining:
-        # Would the remaining text fit as the final chunk?
-        last_len = len(remaining) + suffix_len
-        if not chunks:
-            last_len += prefix_len
-        if last_len <= width:
-            chunks.append(remaining)
-            break
-
-        # Find the rightmost space within budget.
-        pos = remaining.rfind(" ", 0, avail)
-        if pos <= 0:
-            # No space in budget – take the next space after budget.
-            pos = remaining.find(" ", avail)
-            if pos <= 0:
-                # No space at all – cannot wrap further.
-                chunks.append(remaining)
-                break
-
-        chunks.append(remaining[: pos + 1])  # include trailing space
-        remaining = remaining[pos + 1 :]
-        avail = cont_avail
-
-    return chunks
