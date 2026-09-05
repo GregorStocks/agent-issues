@@ -31,10 +31,15 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     Sentence detection is deliberately conservative: punctuation followed by spaces and a capital letter, optionally surrounded by closing/opening quotes.
     Existing newlines remain authoritative boundaries.
     """
-    boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*(?P<next>[^\W\d_]))''')
+    boundary = re.compile(
+        r'''[.!?]["'”’)\]*_`~]* +(?=["'“‘(\[*_`~]*(?P<next>[^\W\d_]))'''
+    )
     key_suffix = re.compile(r"\s*:")
     abbreviation = re.compile(
-        r"\b(?:[^\W\d_]|mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|fig|no|vol|inc|ltd)\.$",
+        r"\b(?:[^\W\d_]|mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|fig|no|vol|inc|ltd|"
+        r"dept|univ|assn|corp|co|approx|est|ref|refs|eq|eqs|figs|vols|pp|"
+        r"rev|hon|gov|sen|rep|gen|col|maj|capt|lt|sgt|supt|"
+        r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.$",
         re.IGNORECASE,
     )
 

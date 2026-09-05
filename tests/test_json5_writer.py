@@ -135,6 +135,9 @@ def test_default_keeps_long_sentence_on_one_line():
         "Ask J. R. Smith for help.",
         "Try another platform, e.g. Linux.",
         "See Fig. A for details.",
+        "See the Dept. Chair today.",
+        "Ask Capt. Smith for help.",
+        "Read the Acme Corp. Report today.",
     ],
 )
 def test_abbreviations_and_initials_stay_with_their_sentence(sentence):
@@ -153,3 +156,23 @@ def test_unicode_sentence_starts(next_sentence, ensure_ascii):
     assert parsed == obj
     assert "First sentence. \\\n" in text
     assert dumps_json5(parsed, ensure_ascii=ensure_ascii) == text
+
+
+@pytest.mark.parametrize(
+    "marked_sentence",
+    [
+        "**Next sentence.**",
+        "*Next sentence.*",
+        "_Next sentence._",
+        "__Next sentence.__",
+        "~~Next sentence.~~",
+        "`Next sentence.`",
+        "[Next sentence](https://example.com).",
+    ],
+)
+def test_markdown_sentence_boundaries(marked_sentence):
+    obj = {"description": "First sentence. " + marked_sentence + " Last sentence."}
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    assert "First sentence. \\\n" + marked_sentence + " \\\nLast sentence." in text
+    assert dumps_json5(parsed) == text
