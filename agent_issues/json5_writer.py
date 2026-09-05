@@ -108,7 +108,7 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
             prefix = fence_container.match(raw_content)
             if prefix:
                 content = raw_content[prefix.end():]
-            elif not raw_content.strip():
+            elif not raw_content.strip() and ">" not in fence_container.pattern:
                 content = raw_content
             else:
                 blocks.append((fence_start, offset))
@@ -129,7 +129,7 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
             ):
                 blocks.append((fence_start, offset + len(line)))
                 fence = None
-        elif marker:
+        elif marker and not (marker[1][0] == "`" and "`" in marker[2]):
             fence = marker[1]
             fence_start = offset
             fence_container = containers[index]
@@ -153,21 +153,26 @@ def _markdown_literal_ranges(value: str) -> list[tuple[int, int]]:
 def _inline_code_ranges(value: str, start: int, end: int) -> list[tuple[int, int]]:
     """Match code delimiters, ignoring backslash-escaped opening backticks."""
     runs = list(re.finditer(r"`+", value[start:end]))
-    next_by_length: dict[int, int] = {}
-    closing: dict[int, int] = {}
-    for index in range(len(runs) - 1, -1, -1):
-        length = len(runs[index][0])
-        if length in next_by_length:
-            closing[index] = next_by_length[length]
-        next_by_length[length] = index
-    ranges = []
-    index = 0
-    while index < len(runs):
-        position = start + runs[index].start()
+    openings = []
+    for run in runs:
+        position = start + run.start()
         backslashes = 0
         while position - backslashes > start and value[position - backslashes - 1] == "\\":
             backslashes += 1
-        if backslashes % 2 or index not in closing:
+        escaped = backslashes % 2
+        openings.append((position + escaped, len(run[0]) - escaped))
+    next_by_length: dict[int, int] = {}
+    closing: dict[int, int] = {}
+    for index in range(len(runs) - 1, -1, -1):
+        length = openings[index][1]
+        if length in next_by_length:
+            closing[index] = next_by_length[length]
+        next_by_length[len(runs[index][0])] = index
+    ranges = []
+    index = 0
+    while index < len(runs):
+        position = openings[index][0]
+        if index not in closing:
             index += 1
             continue
         last = closing[index]

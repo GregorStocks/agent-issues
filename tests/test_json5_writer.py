@@ -184,6 +184,7 @@ def test_markdown_sentence_boundaries(marked_sentence):
     [
         "`First sentence. Second sentence.`",
         "``First ` sentence. Second sentence.``",
+        r"\```First sentence. Second sentence.``",
         "```text\nFirst sentence. Second sentence.\n```",
         "~~~~text\nFirst sentence. Second sentence.\n~~~~",
         "```text\nFirst sentence. Second sentence.",
@@ -214,4 +215,19 @@ def test_escaped_backticks_do_not_suppress_sentence_breaks():
     text, parsed = _roundtrip(obj)
     assert parsed == obj
     assert "marker. \\\nNext sentence. \\\nAnother" in text
+    assert dumps_json5(parsed) == text
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "```foo`bar\nFirst sentence. Second sentence.",
+        "> ```\n> Code\n\n> First sentence. Second sentence.",
+    ],
+)
+def test_prose_outside_valid_fences_is_split(description):
+    obj = {"description": description}
+    text, parsed = _roundtrip(obj)
+    assert parsed == obj
+    assert "First sentence. \\\nSecond sentence." in text
     assert dumps_json5(parsed) == text
