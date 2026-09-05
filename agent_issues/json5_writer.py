@@ -31,10 +31,10 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
     Sentence detection is deliberately conservative: punctuation followed by spaces and a capital letter, optionally surrounded by closing/opening quotes.
     Existing newlines remain authoritative boundaries.
     """
-    boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*[A-Z])''')
+    boundary = re.compile(r'''[.!?]["'”’)]* +(?=["'“‘(]*(?P<next>[^\W\d_]))''')
     key_suffix = re.compile(r"\s*:")
     abbreviation = re.compile(
-        r"\b(?:[a-z]|mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|fig|no|vol|inc|ltd)\.$",
+        r"\b(?:[^\W\d_]|mr|mrs|ms|dr|prof|sr|jr|st|vs|etc|fig|no|vol|inc|ltd)\.$",
         re.IGNORECASE,
     )
 
@@ -45,6 +45,8 @@ def _split_sentence_strings(text: str, *, ensure_ascii: bool) -> str:
         chunks = []
         start = 0
         for sentence in boundary.finditer(value):
+            if not sentence.group("next").isupper():
+                continue
             # A single initial also covers the final letter of U.S. or e.g.
             punctuation_end = sentence.start() + 1
             if abbreviation.search(

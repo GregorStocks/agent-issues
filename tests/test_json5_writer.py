@@ -143,3 +143,13 @@ def test_abbreviations_and_initials_stay_with_their_sentence(sentence):
     assert parsed == obj
     assert sentence + " \\\nAnother sentence." in text
     assert dumps_json5(parsed) == text
+
+
+@pytest.mark.parametrize("ensure_ascii", [False, True])
+@pytest.mark.parametrize("next_sentence", ["Écrire ensuite.", "Überprüfen.", "Проверить."])
+def test_unicode_sentence_starts(next_sentence, ensure_ascii):
+    obj = {"description": "First sentence. " + next_sentence}
+    text, parsed = _roundtrip(obj, ensure_ascii=ensure_ascii)
+    assert parsed == obj
+    assert "First sentence. \\\n" in text
+    assert dumps_json5(parsed, ensure_ascii=ensure_ascii) == text
