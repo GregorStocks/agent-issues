@@ -1,0 +1,27 @@
+{
+  "title": "Do not ignore current-head review feedback received during submit \
+hooks",
+  "description": "The shared agent-submit command invokes issue_watch_pr.run \
+only after after_publish hooks finish, and that watcher snapshots all existing \
+feedback as baseline_feedback. A review of the newly pushed commit arriving \
+during a long make signoff hook is therefore silently treated as old feedback. \
+Transferred from Block Descent issue p2-agent-submit-review-during-hooks. \
+Observed on https://github.com/GregorStocks/block-descent/pull/189: review \
+5123867679 for head 460cb5f arrived at 2026-09-06T02:47:18Z while the newly \
+required balance report was running; after signoff the watcher repeatedly \
+printed waiting for codex and did not surface the unresolved current-head \
+comment. Fix this in the shared agent-issues tooling by capturing the feedback \
+baseline before publishing/hooks or by distinguishing current-head feedback \
+from previously handled reviews. Add a regression test with feedback arriving \
+during an after-publish hook. Do not bypass the repository signoff hook to \
+avoid the race.",
+  "status": "open",
+  "priority": 2,
+  "type": "bug",
+  "labels": [
+    "tooling",
+    "agent-issues",
+  ],
+  "created_at": "2026-09-06T02:56:50Z",
+  "updated_at": "2026-09-06T18:26:23Z",
+}
