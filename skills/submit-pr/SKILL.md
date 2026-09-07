@@ -87,6 +87,7 @@ For each canonical key, locate the issue file:
 
   When Code Mode transcript matching is needed, use an unambiguous `tools.exec_command({...})` or `tools.shell_command({...})` call with literal arguments and double-quoted strings.
   The hook deliberately rejects ambiguous or dynamically constructed calls when it cannot establish the command's execution lifetime.
+  Shell wrappers such as `timeout` can terminate even a persistent session's command and must also allow at least the configured minimum duration.
   Keep polling through `agent-submit`'s own CI/review watching and apply the exit-code handling below, including timeout guidance.
   If CI is passing and `agent-submit` has not exited, it may still be waiting for review.
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 import os
 import posixpath
 import re
@@ -102,6 +103,7 @@ class Invocation:
     args: tuple[str, ...]
     redirection_targets: tuple[str, ...] = ()
     cwd: str = "."
+    timeout_ms: int | None = None
 
     @property
     def basename(self) -> str:
@@ -215,9 +217,29 @@ def _redirection_targets(tokens: list[str]) -> tuple[str, ...]:
     return tuple(targets)
 
 
+def _minimum_timeout_ms(*values: int | None) -> int | None:
+    return min((value for value in values if value is not None), default=None)
+
+
+def _shell_timeout_ms(duration: str) -> int | None:
+    """Read ordinary timeout durations; zero disables the shell deadline."""
+
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]*)?|\.[0-9]+)([smhd]?)", duration)
+    if match is None:
+        return 0  # Unknown duration cannot establish a sufficient lifetime.
+    milliseconds = (
+        float(match[1])
+        * {"": 1000, "s": 1000, "m": 60000, "h": 3600000, "d": 86400000}[match[2]]
+    )
+    if not math.isfinite(milliseconds):
+        return 0
+    return int(milliseconds) if milliseconds else None
+
+
 def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
     env: dict[str, str] = {}
     cwd = "."
+    timeout_ms = None
     redirection_targets = _redirection_targets(tokens)
     index = 0
 
@@ -292,8 +314,13 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
         if name == "timeout":
             index += 1
             while index < len(tokens) and tokens[index].startswith("-"):
-                index = _skip_option(tokens, index, {"-s", "--signal", "-k", "--kill-after"})
+                index = _skip_option(
+                    tokens, index, {"-s", "--signal", "-k", "--kill-after"}
+                )
             if index < len(tokens):
+                timeout_ms = _minimum_timeout_ms(
+                    timeout_ms, _shell_timeout_ms(tokens[index])
+                )
                 index += 1
             continue
         if name == "env":
@@ -314,12 +341,24 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
                     index += 1
                     continue
                 if token.startswith("-S") and len(token) > 2:
-                    return Invocation(env, "sh", ("-c", token[2:]), cwd=cwd)
+                    return Invocation(
+                        env, "sh", ("-c", token[2:]), cwd=cwd, timeout_ms=timeout_ms
+                    )
                 if token in {"-S", "--split-string"} and index + 1 < len(tokens):
-                    return Invocation(env, "sh", ("-c", tokens[index + 1]), cwd=cwd)
+                    return Invocation(
+                        env,
+                        "sh",
+                        ("-c", tokens[index + 1]),
+                        cwd=cwd,
+                        timeout_ms=timeout_ms,
+                    )
                 if token.startswith("--split-string="):
                     return Invocation(
-                        env, "sh", ("-c", token.split("=", 1)[1]), cwd=cwd
+                        env,
+                        "sh",
+                        ("-c", token.split("=", 1)[1]),
+                        cwd=cwd,
+                        timeout_ms=timeout_ms,
                     )
                 if token.startswith("-"):
                     index += 1
@@ -330,7 +369,14 @@ def _unwrap_invocation(tokens: list[str]) -> Invocation | None:
 
     if index >= len(tokens):
         return None
-    return Invocation(env, tokens[index], tuple(tokens[index + 1 :]), redirection_targets, cwd)
+    return Invocation(
+        env,
+        tokens[index],
+        tuple(tokens[index + 1 :]),
+        redirection_targets,
+        cwd,
+        timeout_ms,
+    )
 
 
 def _shell_c_payload(invocation: Invocation) -> str | None:
@@ -348,7 +394,9 @@ def _shell_c_payload(invocation: Invocation) -> str | None:
     return None
 
 
-def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocation]:
+def command_invocations(
+    command: str, *, initial_cwd: str = ".", initial_timeout_ms: int | None = None
+) -> list[Invocation]:
     """Return ordinary executable invocations from a simple shell command."""
 
     invocations: list[Invocation] = []
@@ -361,10 +409,20 @@ def command_invocations(command: str, *, initial_cwd: str = ".") -> list[Invocat
                 invocations.append(Invocation({}, "", (), targets, cwd))
             continue
 
-        invocation = replace(invocation, cwd=_clean_path(invocation.cwd, cwd=cwd))
+        invocation = replace(
+            invocation,
+            cwd=_clean_path(invocation.cwd, cwd=cwd),
+            timeout_ms=_minimum_timeout_ms(initial_timeout_ms, invocation.timeout_ms),
+        )
         payload = _shell_c_payload(invocation)
         if payload is not None:
-            invocations.extend(command_invocations(payload, initial_cwd=invocation.cwd))
+            invocations.extend(
+                command_invocations(
+                    payload,
+                    initial_cwd=invocation.cwd,
+                    initial_timeout_ms=invocation.timeout_ms,
+                )
+            )
             continue
 
         invocations.append(invocation)
@@ -482,6 +540,12 @@ def _execution_from_transcript_lines(
     *,
     command: str | None = None,
 ) -> ToolExecution | None:
+    """Return None when transcript syntax cannot establish a matching call.
+
+    An empty ToolExecution instead means a matched tool has an unknown or invalid lifetime.
+    Only absent evidence may fall back to a bounded tool's direct timeout.
+    """
+
     parsed_events: list[dict[str, Any]] = []
     for line in lines:
         try:
@@ -533,7 +597,7 @@ def _execution_from_transcript_lines(
     if not active:
         return None
     if len(active) != 1 or active[0] is not calls[-1]:
-        return ToolExecution()
+        return None
     outer = active[0]
     if (
         outer.get("type") != "custom_tool_call"
@@ -543,13 +607,13 @@ def _execution_from_transcript_lines(
         return ToolExecution()
     source = outer.get("input")
     if not isinstance(source, str):
-        return ToolExecution()
+        return None
     nested = _code_mode_calls(source)
     if nested is None:
-        return ToolExecution()
+        return None
     matching = [(name, args) for name, args in nested if _call_command(args) == command]
     if len(matching) != 1:
-        return ToolExecution()
+        return None
     return _call_execution(*matching[0])
 
 
@@ -1089,7 +1153,7 @@ def _short_timeout_message(command_name: str, timeout_ms: int | None, minimum_ms
         )
     timeout_minutes = timeout_ms / 60_000
     return (
-        f"Do not run `{command_name}` with a tool timeout of only "
+        f"Do not run `{command_name}` with a timeout of only "
         f"{timeout_minutes:.1f} minutes. Use at least {minimum_minutes} minutes "
         "so the command can finish or print its own actionable timeout guidance."
     )
@@ -1120,14 +1184,19 @@ def rejection_message(
     *,
     timeout_ms: int | None = None,
     persistent_session: bool = False,
+    shell_timeout_ms: int | None = None,
     dirty_generated_output: bool | None = None,
     cwd: str = ".",
 ) -> str | None:
     """Return a user-facing rejection message, or ``None`` to allow."""
 
     config = config or HookConfig()
-    invocations = command_invocations(command, initial_cwd=cwd)
-    if dirty_generated_output is None and any(_git_push_args(inv) is not None for inv in invocations):
+    invocations = command_invocations(
+        command, initial_cwd=cwd, initial_timeout_ms=shell_timeout_ms
+    )
+    if dirty_generated_output is None and any(
+        _git_push_args(inv) is not None for inv in invocations
+    ):
         dirty_generated_output = _has_dirty_generated_output(config.generated_paths)
     dirty_generated_output = bool(dirty_generated_output)
 
@@ -1138,6 +1207,7 @@ def rejection_message(
                 "Only kill processes by specific PID after verifying the PID."
             )
 
+        effective_timeout_ms = _minimum_timeout_ms(timeout_ms, invocation.timeout_ms)
         alias_payload = _git_inline_alias_payload(invocation)
         if alias_payload is not None:
             alias_message = rejection_message(
@@ -1145,6 +1215,7 @@ def rejection_message(
                 config,
                 timeout_ms=timeout_ms,
                 persistent_session=persistent_session,
+                shell_timeout_ms=invocation.timeout_ms,
                 dirty_generated_output=dirty_generated_output,
                 cwd=_git_cwd(invocation),
             )
@@ -1194,17 +1265,18 @@ def rejection_message(
                 f"The only supported way to update them is `{config.generated_command}`."
             )
 
-        if (
-            invocation.basename == "agent-submit"
-            and not persistent_session
-            and (
-                timeout_ms is None
-                or timeout_ms < config.minimum_agent_submit_timeout_ms
+        if invocation.basename == "agent-submit":
+            missing_tool_lifetime = timeout_ms is None and not persistent_session
+            short_deadline = (
+                effective_timeout_ms is not None
+                and effective_timeout_ms < config.minimum_agent_submit_timeout_ms
             )
-        ):
-            return _short_timeout_message(
-                "agent-submit", timeout_ms, config.minimum_agent_submit_timeout_ms
-            )
+            if missing_tool_lifetime or short_deadline:
+                return _short_timeout_message(
+                    "agent-submit",
+                    effective_timeout_ms if short_deadline else timeout_ms,
+                    config.minimum_agent_submit_timeout_ms,
+                )
 
         for target in _make_targets(invocation):
             if target in config.internal_make_targets:
@@ -1214,9 +1286,12 @@ def rejection_message(
                 )
             if target in config.make_targets_requiring_timeout_ms:
                 minimum_ms = config.make_targets_requiring_timeout_ms[target]
-                if timeout_ms is None or timeout_ms < minimum_ms:
+                if timeout_ms is None or (
+                    effective_timeout_ms is not None
+                    and effective_timeout_ms < minimum_ms
+                ):
                     return _short_timeout_message(
-                        f"make {target}", timeout_ms, minimum_ms
+                        f"make {target}", effective_timeout_ms, minimum_ms
                     )
 
         for block in config.command_family_blocks:

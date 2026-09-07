@@ -810,3 +810,97 @@ def test_native_exec_cannot_hide_its_cmd_behind_an_extra_command_field() -> None
         "tool_input": {"cmd": SUBMIT_COMMAND, "command": "make test"},
     }
     assert pretool_hook.evaluate_hook_input(data, _config()) is not None
+
+
+@pytest.mark.parametrize("name,field", [("Bash", "timeout"), ("Shell", "timeout_ms")])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "const note = `template`; tools.shell_command(args)",
+        "const matcher = /value/; tools.shell_command(args)",
+        "tools.shell_command(args)",
+    ],
+)
+def test_valid_direct_timeout_survives_unsupported_transcript_syntax(
+    tmp_path: Path, name: str, field: str, source: str
+) -> None:
+    data = _transcript_hook(tmp_path, _outer_call(source))
+    data["tool_name"] = name
+    data["tool_input"][field] = 4200000
+    assert pretool_hook.evaluate_hook_input(data, _config()) is None
+    assert pretool_hook.tool_timeout_ms(data) == 4200000
+    assert not pretool_hook.tool_execution(data).persistent
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+@pytest.mark.parametrize(
+    "wrapper,allowed",
+    [
+        ("timeout 1", False),
+        ("timeout 4199s", False),
+        ("timeout 70m", True),
+        ("timeout 1.5h", True),
+        ("timeout .5h", False),
+        ("timeout 1d", True),
+        ("timeout 0", True),
+        ("timeout unknown", False),
+        ("env FOO=bar timeout --signal=KILL 1", False),
+        ("timeout -k 10 --signal TERM 1", False),
+        ("timeout 2h timeout 1", False),
+        ("timeout 1 timeout 2h", False),
+        ("timeout 1 timeout 0", False),
+    ],
+)
+def test_submit_respects_shell_timeout_wrappers(
+    persistent: bool, wrapper: str, allowed: bool
+) -> None:
+    command = wrapper + " " + SUBMIT_COMMAND
+    data = (
+        {"tool_name": "exec_command", "tool_input": {"cmd": command}}
+        if persistent
+        else {
+            "tool_name": "Bash",
+            "tool_input": {"command": command, "timeout": 4200000},
+        }
+    )
+    message = pretool_hook.evaluate_hook_input(data, _config())
+    assert (message is None) == allowed
+    if not allowed:
+        assert "70 minutes" in message
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "timeout 1 sh -c 'agent-submit --title T --body B'",
+        "sh -c 'timeout 1 agent-submit --title T --body B'",
+        "timeout 1 env -S 'agent-submit --title T --body B'",
+        "timeout 1 env '-Sagent-submit --title T --body B'",
+        "timeout 1 env --split-string='agent-submit --title T --body B'",
+        "timeout 1 git -c 'alias.submit=!agent-submit --title T --body B' submit",
+        "git -c 'alias.submit=!timeout 1 agent-submit --title T --body B' submit",
+    ],
+)
+def test_shell_deadline_survives_nested_shells_and_aliases(command: str) -> None:
+    data = {"tool_name": "exec_command", "tool_input": {"cmd": command}}
+    assert "70 minutes" in pretool_hook.evaluate_hook_input(data, _config())
+
+
+def test_shell_timeout_is_scoped_to_its_command() -> None:
+    data = {
+        "tool_name": "exec_command",
+        "tool_input": {"cmd": "timeout 1 make test; " + SUBMIT_COMMAND},
+    }
+    assert pretool_hook.evaluate_hook_input(data, _config()) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "timeout 70m agent-submit --title T --body B",
+        "timeout 70m git -c 'alias.submit=!agent-submit --title T --body B' submit",
+    ],
+)
+def test_shell_timeout_does_not_establish_unknown_tool_lifetime(command: str) -> None:
+    data = {"tool_name": "Shell", "tool_input": {"command": command}}
+    assert pretool_hook.evaluate_hook_input(data, _config()) is not None
