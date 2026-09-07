@@ -72,7 +72,23 @@ For each canonical key, locate the issue file:
   leaves uncommitted changes, switches branches, or changes HEAD after publish,
   fix that local problem and rerun `agent-submit`.
 
-  Do not proceed to step 5 or declare victory until agent-submit has actually exited. If you run it through a command wrapper that has its own timeout, set that wrapper timeout above agent-submit's internal watcher timeout, preferably at least 70 minutes. A shorter wrapper timeout hides agent-submit's actionable exit code and timeout guidance. If you notice that CI is passing and agent-submit has not exited, we are likely still waiting for review.
+  Do not proceed to step 5 or declare victory until `agent-submit` has actually exited.
+  Choose the execution method from the tools available in the current harness:
+
+  - **Tools with a command timeout**, including Claude Code's Bash `timeout` and Codex's older shell `timeout_ms`: set the supported timeout above `agent-submit`'s internal watcher timeout, at least 70 minutes by default.
+    A shorter command timeout hides the actionable exit code and timeout guidance.
+  - **Codex persistent `exec_command` sessions**, directly or inside `functions.exec`: `yield_time_ms` controls when output returns, not when the command is killed.
+    Do not invent `timeout` or `timeout_ms` arguments for this tool.
+    Retain any returned `session_id` and use `write_stdin` to poll that session until the final exit code is available.
+    If the outer `functions.exec` call itself yields a cell ID, resume it with its wait tool to retrieve the inner result and session ID.
+    A yielded call, a session ID, or passing CI alone does not mean submission is complete.
+  - **Other tools**: use their documented command-lifetime controls; do not assume yielding or a background option provides the same persistence as Codex's supported tool.
+    If the available tool cannot meet the lifetime requirement, report the limitation instead of fabricating parameters or bypassing the hook.
+
+  When Code Mode transcript matching is needed, use an unambiguous `tools.exec_command({...})` or `tools.shell_command({...})` call with literal arguments and double-quoted strings.
+  The hook deliberately rejects ambiguous or dynamically constructed calls when it cannot establish the command's execution lifetime.
+  Keep polling through `agent-submit`'s own CI/review watching and apply the exit-code handling below, including timeout guidance.
+  If CI is passing and `agent-submit` has not exited, it may still be waiting for review.
 
 5. **Interpret the exit code:**
 

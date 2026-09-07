@@ -400,109 +400,220 @@ def _timeout_field_ms(mapping: dict[str, Any]) -> int | None:
     return None
 
 
-def tool_timeout_ms(data: dict[str, Any], command: str | None = None) -> int | None:
+@dataclass(frozen=True)
+class ToolExecution:
+    """Command lifetime, independent of how frequently the tool yields output."""
+
+    timeout_ms: int | None = None
+    persistent: bool = False
+
+
+_PERSISTENT_EXEC_TOOLS = {"exec_command", "functions.exec_command"}
+_BOUNDED_SHELL_TOOLS = {"Bash", "Shell", "shell_command", "functions.shell_command"}
+
+
+def _call_execution(name: object, arguments: dict[str, Any]) -> ToolExecution:
+    if not isinstance(name, str):
+        return ToolExecution()
+    if name in _PERSISTENT_EXEC_TOOLS:
+        if not isinstance(arguments.get("cmd"), str) or (
+            "command" in arguments and arguments["command"] != arguments["cmd"]
+        ):
+            return ToolExecution()
+        # These fields are not in exec_command's schema; never use invented
+        # timeout parameters as evidence of a safe command lifetime.
+        if "timeout" in arguments or "timeout_ms" in arguments:
+            return ToolExecution()
+        return ToolExecution(persistent=True)
+    if name in _BOUNDED_SHELL_TOOLS:
+        return ToolExecution(timeout_ms=_timeout_field_ms(arguments))
+    return ToolExecution()
+
+
+def _call_command(arguments: dict[str, Any]) -> str | None:
+    command = arguments.get("command", arguments.get("cmd"))
+    return command if isinstance(command, str) else None
+
+
+def tool_execution(data: dict[str, Any], command: str | None = None) -> ToolExecution:
     tool_input = data.get("tool_input", {})
-    if isinstance(tool_input, dict) and (coerced := _timeout_field_ms(tool_input)) is not None:
-        return coerced
+    if not isinstance(tool_input, dict):
+        return ToolExecution()
+    command = command if command is not None else _call_command(tool_input)
+    name = data.get("tool_name")
+    if isinstance(name, str) and name in _PERSISTENT_EXEC_TOOLS:
+        return _call_execution(name, tool_input)
 
     transcript_path = data.get("transcript_path")
     tool_use_id = data.get("tool_use_id")
-    if not isinstance(transcript_path, str) or not isinstance(tool_use_id, str):
-        return None
-    try:
-        with Path(transcript_path).open(encoding="utf-8") as handle:
-            return _timeout_ms_from_transcript_lines(
-                deque(handle, maxlen=300),
-                tool_use_id,
-                command=command,
-            )
-    except OSError:
-        return None
+    if isinstance(transcript_path, str) and isinstance(tool_use_id, str):
+        try:
+            with Path(transcript_path).open(encoding="utf-8") as handle:
+                execution = _execution_from_transcript_lines(
+                    deque(handle, maxlen=300), tool_use_id, command=command
+                )
+            if execution is not None:
+                if execution.persistent and (
+                    "timeout" in tool_input or "timeout_ms" in tool_input
+                ):
+                    return ToolExecution()
+                # A short timeout in the actual hook input cannot be rescued
+                # by a longer timeout found in the transcript.
+                direct_timeout = _timeout_field_ms(tool_input)
+                if direct_timeout is not None and execution.timeout_ms is not None:
+                    return ToolExecution(
+                        timeout_ms=min(direct_timeout, execution.timeout_ms)
+                    )
+                return execution
+        except OSError:
+            pass
+    return _call_execution(name, tool_input)
 
 
-def _timeout_ms_from_transcript_lines(
+def tool_timeout_ms(data: dict[str, Any], command: str | None = None) -> int | None:
+    """Return only a real command timeout; yielding is not a timeout."""
+
+    return tool_execution(data, command).timeout_ms
+
+
+def _execution_from_transcript_lines(
     lines: deque[str],
     tool_use_id: str,
     *,
     command: str | None = None,
-) -> int | None:
+) -> ToolExecution | None:
     parsed_events: list[dict[str, Any]] = []
     for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(event, dict):
+            continue
+        if "payload" in event and event.get("type", "response_item") != "response_item":
+            continue
         payload = event.get("payload", event)
         if isinstance(payload, dict):
             parsed_events.append(payload)
 
+    completed_call_ids = {
+        payload.get("call_id")
+        for payload in parsed_events
+        if payload.get("type") in {"custom_tool_call_output", "function_call_output"}
+        and isinstance(payload.get("call_id"), str)
+    }
     for payload in reversed(parsed_events):
         if payload.get("call_id") != tool_use_id:
             continue
+        if payload.get("type") != "function_call" or tool_use_id in completed_call_ids:
+            return ToolExecution()
         arguments = payload.get("arguments")
         if not isinstance(arguments, str):
-            continue
+            return ToolExecution()
         try:
             parsed = json.loads(arguments)
         except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            return _timeout_field_ms(parsed)
+            return ToolExecution()
+        if not isinstance(parsed, dict) or (
+            command is not None and _call_command(parsed) != command
+        ):
+            return ToolExecution()
+        return _call_execution(payload.get("name"), parsed)
 
     if command is None:
         return None
-    return _code_mode_shell_timeout_ms(parsed_events, command)
+    # Nested hook IDs are not recorded in Code Mode transcripts. Only use a
+    # single active, latest outer call and an unambiguous literal command.
+    calls = [
+        payload
+        for payload in parsed_events
+        if payload.get("type") in {"custom_tool_call", "function_call"}
+    ]
+    active = [call for call in calls if call.get("call_id") not in completed_call_ids]
+    if not active:
+        return None
+    if len(active) != 1 or active[0] is not calls[-1]:
+        return ToolExecution()
+    outer = active[0]
+    if (
+        outer.get("type") != "custom_tool_call"
+        or outer.get("name") not in {"exec", "functions.exec"}
+        or not isinstance(outer.get("call_id"), str)
+    ):
+        return ToolExecution()
+    source = outer.get("input")
+    if not isinstance(source, str):
+        return ToolExecution()
+    nested = _code_mode_calls(source)
+    if nested is None:
+        return ToolExecution()
+    matching = [(name, args) for name, args in nested if _call_command(args) == command]
+    if len(matching) != 1:
+        return ToolExecution()
+    return _call_execution(*matching[0])
 
 
-def _code_mode_shell_timeout_ms(
-    payloads: list[dict[str, Any]], command: str
-) -> int | None:
-    completed_call_ids = {
-        payload.get("call_id")
-        for payload in payloads
-        if payload.get("type") == "custom_tool_call_output"
-        and isinstance(payload.get("call_id"), str)
-    }
+def _code_mode_calls(source: str) -> list[tuple[str, dict[str, Any]]] | None:
+    """Read literal tools.NAME({...}) calls without searching strings/comments.
 
-    for payload in reversed(payloads):
-        if (
-            payload.get("type") != "custom_tool_call"
-            or payload.get("name") != "exec"
-            or payload.get("call_id") in completed_call_ids
-        ):
+    This is deliberately not a JavaScript evaluator. Dynamic arguments,
+    templates and regex literals fail closed instead of guessing their meaning.
+    """
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    index = 0
+    previous = ""
+    while index < len(source):
+        char = source[index]
+        if char.isspace():
+            index += 1
             continue
-        source = payload.get("input")
-        if not isinstance(source, str):
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
             continue
-        matching_calls = [
-            call for call in _code_mode_shell_calls(source) if call.get("command") == command
-        ]
-        if len(matching_calls) != 1:
+        if source.startswith("/*", index):
+            end = source.find("*/", index + 2)
+            if end == -1:
+                return None
+            index = end + 2
+            continue
+        if char in "`/":
             return None
-        return _timeout_field_ms(matching_calls[0])
-    return None
-
-
-def _code_mode_shell_calls(source: str) -> list[dict[str, Any]]:
-    marker = "tools.shell_command("
-    calls: list[dict[str, Any]] = []
-    search_from = 0
-
-    while (marker_at := source.find(marker, search_from)) != -1:
-        argument_at = marker_at + len(marker)
-        while argument_at < len(source) and source[argument_at].isspace():
-            argument_at += 1
-        decoded = _decode_code_mode_object(source, argument_at)
-        if decoded is None:
-            search_from = argument_at
+        if char in "\"'":
+            quote = char
+            index += 1
+            while index < len(source) and source[index] != quote:
+                index += 2 if source[index] == "\\" else 1
+            if index >= len(source):
+                return None
+            index += 1
+            previous = quote
             continue
-        parsed, after_argument = decoded
-        while after_argument < len(source) and source[after_argument].isspace():
-            after_argument += 1
-        if after_argument < len(source) and source[after_argument] == ")":
-            calls.append(parsed)
-        search_from = max(after_argument, argument_at + 1)
-
+        token = re.match(r"[\w$]+", source[index:])
+        if token is not None:
+            word = token.group()
+            index += len(word)
+            if word == "tools" and previous not in {".", "?"}:
+                method = re.match(r"\s*\.\s*([A-Za-z_$][\w$]*)\s*\(\s*", source[index:])
+                if method is not None:
+                    argument_at = index + method.end()
+                    decoded = _decode_code_mode_object(source, argument_at)
+                    if decoded is None:
+                        return None
+                    parsed, end = decoded
+                    while end < len(source) and source[end].isspace():
+                        end += 1
+                    if end >= len(source) or source[end] != ")":
+                        return None
+                    calls.append((method.group(1), parsed))
+                    index = end + 1
+                    previous = ")"
+                    continue
+            previous = word
+            continue
+        previous = char
+        index += 1
     return calls
 
 
@@ -1008,6 +1119,7 @@ def rejection_message(
     config: HookConfig | None = None,
     *,
     timeout_ms: int | None = None,
+    persistent_session: bool = False,
     dirty_generated_output: bool | None = None,
     cwd: str = ".",
 ) -> str | None:
@@ -1032,6 +1144,7 @@ def rejection_message(
                 alias_payload,
                 config,
                 timeout_ms=timeout_ms,
+                persistent_session=persistent_session,
                 dirty_generated_output=dirty_generated_output,
                 cwd=_git_cwd(invocation),
             )
@@ -1081,8 +1194,13 @@ def rejection_message(
                 f"The only supported way to update them is `{config.generated_command}`."
             )
 
-        if invocation.basename == "agent-submit" and (
-            timeout_ms is None or timeout_ms < config.minimum_agent_submit_timeout_ms
+        if (
+            invocation.basename == "agent-submit"
+            and not persistent_session
+            and (
+                timeout_ms is None
+                or timeout_ms < config.minimum_agent_submit_timeout_ms
+            )
         ):
             return _short_timeout_message(
                 "agent-submit", timeout_ms, config.minimum_agent_submit_timeout_ms
@@ -1097,7 +1215,9 @@ def rejection_message(
             if target in config.make_targets_requiring_timeout_ms:
                 minimum_ms = config.make_targets_requiring_timeout_ms[target]
                 if timeout_ms is None or timeout_ms < minimum_ms:
-                    return _short_timeout_message(f"make {target}", timeout_ms, minimum_ms)
+                    return _short_timeout_message(
+                        f"make {target}", timeout_ms, minimum_ms
+                    )
 
         for block in config.command_family_blocks:
             if invocation.basename != block.command:
@@ -1122,14 +1242,32 @@ def rejection_message(
     return None
 
 
-def evaluate_hook_input(data: dict[str, Any], config: HookConfig | None = None) -> str | None:
-    """Evaluate a PreToolUse payload. Non-Bash tools are allowed."""
+def evaluate_hook_input(
+    data: dict[str, Any], config: HookConfig | None = None
+) -> str | None:
+    """Evaluate normalized Bash/Shell hooks and native shell execution calls."""
 
     tool_input = data.get("tool_input", {})
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    tool_name = data.get("tool_name")
+    command = _call_command(tool_input) if isinstance(tool_input, dict) else None
+    if (
+        isinstance(tool_name, str)
+        and tool_name in _PERSISTENT_EXEC_TOOLS
+        and isinstance(tool_input, dict)
+    ):
+        command = tool_input.get("cmd", command)
     if not isinstance(command, str):
         return None
-    tool_name = data.get("tool_name")
-    if isinstance(tool_name, str) and tool_name not in {"Bash", "Shell"}:
+    if (
+        isinstance(tool_name, str)
+        and tool_name not in _BOUNDED_SHELL_TOOLS | _PERSISTENT_EXEC_TOOLS
+        and "cmd" not in tool_input
+    ):
         return None
-    return rejection_message(command, config, timeout_ms=tool_timeout_ms(data, command))
+    execution = tool_execution(data, command)
+    return rejection_message(
+        command,
+        config,
+        timeout_ms=execution.timeout_ms,
+        persistent_session=execution.persistent,
+    )

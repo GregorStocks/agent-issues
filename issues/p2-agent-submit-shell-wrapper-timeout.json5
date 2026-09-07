@@ -1,0 +1,18 @@
+{
+  "title": "Account for shell timeout wrappers around agent-submit",
+  "description": "The PreToolUse hook unwraps the shell timeout executable but discards its duration.\n\
+A command such as timeout 1 agent-submit --title T --body B is currently allowed when the execution tool supplies a 70-minute timeout, even though the shell wrapper terminates it after one second.\n\
+This also affects persistent execution sessions because their lifetime does not remove a timeout imposed inside the shell command.\n\
+Preserve wrapper duration metadata and reject insufficient shell timeouts around agent-submit, including nested shell and env wrappers.\n\
+Add regression coverage for short and sufficient wrapper durations while preserving the existing tool-lifetime checks.\n\
+This is a pre-existing command-parsing gap found while implementing Codex persistent-session support; it is separate from identifying the execution tool and its yield semantics.",
+  "status": "open",
+  "priority": 2,
+  "type": "bug",
+  "labels": [
+    "pretool-hook",
+    "agent-submit",
+  ],
+  "created_at": "2026-09-07T23:44:46.518102+00:00",
+  "updated_at": "2026-09-07T23:44:46.518102+00:00",
+}

@@ -52,6 +52,8 @@ handling through `submit-pr` and `agent-submit`.
    After validation, run `git status` again before pushing. Build and test commands can dirty tracked files. Commit intentional artifacts or clean incidental churn before you open the PR.
 
 7. **Submit the PR.** Invoke the `submit-pr` skill (no arguments) — it composes the title and body from the branch state, pushes, opens or updates the PR, and loops through CI failures and review feedback until the PR is clean.
+   Follow its execution-lifetime guidance for the current harness: bounded tools require a sufficient command timeout, while supported Codex persistent sessions require retaining the session ID and polling through the final exit code.
+   Treat a yielded call as work still in progress and preserve `agent-submit`'s timeout and review handling.
 
 ## Guidelines
 
