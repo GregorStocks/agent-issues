@@ -1,0 +1,17 @@
+{
+  "title": "Ignore review progress notifications when waiting for actionable feedback",
+  "description": "The PR watcher treats any new non-author comment as review feedback and exits with code 2.\n\
+On PR #48, the Codex connector posted a comment marked <!-- codex-pull-request-review-summary --> whose only status was Code Review: Running, and agent-submit stopped with instructions to address the comments even though there were no findings or inline comments.\n\
+Distinguish review progress notifications from actionable review feedback so agent-submit continues watching until the review finishes or actual findings arrive.\n\
+Preserve real review comments, inline feedback, and completed review outcomes.\n\
+Add regression tests for the connector progress comment and for genuine feedback arriving afterward.",
+  "status": "open",
+  "priority": 3,
+  "type": "bug",
+  "labels": [
+    "agent-submit",
+    "review",
+  ],
+  "created_at": "2026-09-07T23:48:25.049591+00:00",
+  "updated_at": "2026-09-07T23:48:25.049591+00:00",
+}
