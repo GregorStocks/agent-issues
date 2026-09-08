@@ -904,3 +904,38 @@ def test_shell_timeout_is_scoped_to_its_command() -> None:
 def test_shell_timeout_does_not_establish_unknown_tool_lifetime(command: str) -> None:
     data = {"tool_name": "Shell", "tool_input": {"command": command}}
     assert pretool_hook.evaluate_hook_input(data, _config()) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        SUBMIT_COMMAND + " &",
+        "nohup " + SUBMIT_COMMAND + " &",
+        "sh -c '" + SUBMIT_COMMAND + " &'",
+        "sh -c '" + SUBMIT_COMMAND + "' &",
+        "env -S '" + SUBMIT_COMMAND + "' &",
+        "git -c 'alias.submit=!" + SUBMIT_COMMAND + " &' submit",
+        "git -c 'alias.submit=!" + SUBMIT_COMMAND + "' submit &",
+        SUBMIT_COMMAND + " && echo done &",
+        SUBMIT_COMMAND + " || echo failed &",
+        SUBMIT_COMMAND + " | cat &",
+        SUBMIT_COMMAND + " & wait $!",
+    ],
+)
+def test_persistent_submit_must_remain_foreground(command: str) -> None:
+    data = {"tool_name": "exec_command", "tool_input": {"cmd": command}}
+    assert "foreground" in pretool_hook.evaluate_hook_input(data, _config())
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "make test & " + SUBMIT_COMMAND,
+        "make test && echo done & " + SUBMIT_COMMAND,
+        SUBMIT_COMMAND + "; echo done &",
+        SUBMIT_COMMAND + " --body 'an & in a quoted string'",
+    ],
+)
+def test_background_detection_is_scoped_to_the_shell_list(command: str) -> None:
+    data = {"tool_name": "exec_command", "tool_input": {"cmd": command}}
+    assert pretool_hook.evaluate_hook_input(data, _config()) is None

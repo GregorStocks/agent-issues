@@ -104,6 +104,7 @@ class Invocation:
     redirection_targets: tuple[str, ...] = ()
     cwd: str = "."
     timeout_ms: int | None = None
+    background: bool = False
 
     @property
     def basename(self) -> str:
@@ -395,14 +396,27 @@ def _shell_c_payload(invocation: Invocation) -> str | None:
 
 
 def command_invocations(
-    command: str, *, initial_cwd: str = ".", initial_timeout_ms: int | None = None
+    command: str,
+    *,
+    initial_cwd: str = ".",
+    initial_timeout_ms: int | None = None,
+    initial_background: bool = False,
 ) -> list[Invocation]:
     """Return ordinary executable invocations from a simple shell command."""
 
     invocations: list[Invocation] = []
     cwd = initial_cwd
     previous_cwd = initial_cwd
-    for tokens, separator in _shell_segments(command):
+    segments = _shell_segments(command)
+    background_segments: set[int] = set()
+    group_start = 0
+    for index, (_tokens, separator) in enumerate(segments):
+        if separator == "&":
+            # An entire pipeline / AND-OR list before & runs asynchronously.
+            background_segments.update(range(group_start, index + 1))
+        if separator in {";", "&"}:
+            group_start = index + 1
+    for index, (tokens, separator) in enumerate(segments):
         invocation = _unwrap_invocation(tokens)
         if invocation is None:
             if targets := _redirection_targets(tokens):
@@ -413,6 +427,7 @@ def command_invocations(
             invocation,
             cwd=_clean_path(invocation.cwd, cwd=cwd),
             timeout_ms=_minimum_timeout_ms(initial_timeout_ms, invocation.timeout_ms),
+            background=initial_background or index in background_segments,
         )
         payload = _shell_c_payload(invocation)
         if payload is not None:
@@ -421,6 +436,7 @@ def command_invocations(
                     payload,
                     initial_cwd=invocation.cwd,
                     initial_timeout_ms=invocation.timeout_ms,
+                    initial_background=invocation.background,
                 )
             )
             continue
@@ -1185,6 +1201,7 @@ def rejection_message(
     timeout_ms: int | None = None,
     persistent_session: bool = False,
     shell_timeout_ms: int | None = None,
+    background: bool = False,
     dirty_generated_output: bool | None = None,
     cwd: str = ".",
 ) -> str | None:
@@ -1192,7 +1209,10 @@ def rejection_message(
 
     config = config or HookConfig()
     invocations = command_invocations(
-        command, initial_cwd=cwd, initial_timeout_ms=shell_timeout_ms
+        command,
+        initial_cwd=cwd,
+        initial_timeout_ms=shell_timeout_ms,
+        initial_background=background,
     )
     if dirty_generated_output is None and any(
         _git_push_args(inv) is not None for inv in invocations
@@ -1216,6 +1236,7 @@ def rejection_message(
                 timeout_ms=timeout_ms,
                 persistent_session=persistent_session,
                 shell_timeout_ms=invocation.timeout_ms,
+                background=invocation.background,
                 dirty_generated_output=dirty_generated_output,
                 cwd=_git_cwd(invocation),
             )
@@ -1266,6 +1287,11 @@ def rejection_message(
             )
 
         if invocation.basename == "agent-submit":
+            if persistent_session and invocation.background:
+                return (
+                    "Run `agent-submit` in the foreground of the persistent session, "
+                    "without shell backgrounding (`&`), and poll through its final exit code."
+                )
             missing_tool_lifetime = timeout_ms is None and not persistent_session
             short_deadline = (
                 effective_timeout_ms is not None

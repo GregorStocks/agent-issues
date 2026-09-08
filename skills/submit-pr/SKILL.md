@@ -79,6 +79,7 @@ For each canonical key, locate the issue file:
     A shorter command timeout hides the actionable exit code and timeout guidance.
   - **Codex persistent `exec_command` sessions**, directly or inside `functions.exec`: `yield_time_ms` controls when output returns, not when the command is killed.
     Do not invent `timeout` or `timeout_ms` arguments for this tool.
+    Run `agent-submit` in the foreground; do not detach it with shell backgrounding (`&`).
     Retain any returned `session_id` and use `write_stdin` to poll that session until the final exit code is available.
     If the outer `functions.exec` call itself yields a cell ID, resume it with its wait tool to retrieve the inner result and session ID.
     A yielded call, a session ID, or passing CI alone does not mean submission is complete.
