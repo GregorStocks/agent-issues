@@ -48,7 +48,6 @@ class CommandFamilyBlock:
 class HookConfig:
     """Declarative repo configuration for shared hook rules."""
 
-    branch_switch_signoff_env: str = "AGENT_BRANCH_SWITCH_SIGNOFF"
     generated_paths: tuple[str, ...] = ()
     generated_command: str = "the generator target"
     command_family_blocks: tuple[CommandFamilyBlock, ...] = ()
@@ -61,9 +60,6 @@ class HookConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "HookConfig":
         return cls(
-            branch_switch_signoff_env=str(
-                data.get("branch_switch_signoff_env", cls.branch_switch_signoff_env)
-            ),
             generated_paths=tuple(str(path) for path in data.get("generated_paths", ())),
             generated_command=str(data.get("generated_command", cls.generated_command)),
             command_family_blocks=tuple(
@@ -884,52 +880,6 @@ def _git_push_args(invocation: Invocation) -> list[str] | None:
     return rest if name in {"push", "send-pack"} else None
 
 
-def _push_uses_force(args: list[str]) -> bool:
-    return any(
-        arg in {"--force", "--force-with-lease", "--force-if-includes"}
-        or arg.startswith("--force-with-lease=")
-        or (arg.startswith("-") and not arg.startswith("--") and "f" in arg[1:])
-        for arg in args
-    )
-
-
-_SWITCH_OPTS_WITH_ARG = {"-c", "-C", "--create", "--force-create", "--orphan"}
-_CHECKOUT_OPTS_WITH_ARG = {"-b", "-B", "--orphan", "--pathspec-from-file"}
-
-
-def _branch_target(args: list[str], opts_with_arg: set[str], *, checkout: bool) -> str | None:
-    if checkout and "--" in args and args.index("--") < len(args) - 1:
-        return None
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--":
-            return None
-        if token in {"-d", "--detach"}:
-            return args[index + 1] if index + 1 < len(args) else "HEAD"
-        if token in opts_with_arg:
-            return args[index + 1] if index + 1 < len(args) else ""
-        if any(token.startswith(f"{opt}=") for opt in opts_with_arg if opt.startswith("--")):
-            return token.split("=", 1)[1]
-        if token.startswith("-"):
-            index += 1
-            continue
-        return token
-    return None
-
-
-def _branch_switch_target(invocation: Invocation) -> str | None:
-    subcommand = _git_subcommand(invocation)
-    if subcommand is None:
-        return None
-    name, rest = subcommand
-    if name == "switch":
-        return _branch_target(rest, _SWITCH_OPTS_WITH_ARG, checkout=False)
-    if name == "checkout":
-        return _branch_target(rest, _CHECKOUT_OPTS_WITH_ARG, checkout=True)
-    return None
-
-
 def _gh_chain(invocation: Invocation) -> list[str]:
     if invocation.basename != "gh":
         return []
@@ -1175,13 +1125,7 @@ def _short_timeout_message(command_name: str, timeout_ms: int | None, minimum_ms
     )
 
 
-def _raw_pr_message(force: bool = False) -> str:
-    if force:
-        return (
-            "Do not force-push with raw 'git push'. Use "
-            "'agent-submit --force --title \"...\" --body \"...\"' so the forced "
-            "push, PR metadata updates, and CI watching happen together."
-        )
+def _raw_pr_message() -> str:
     return (
         "Do not publish PR updates with raw 'git push' or 'gh pr create/edit'. Use "
         "'agent-submit --title \"...\" --body \"...\"' so push, PR metadata updates, "
@@ -1258,18 +1202,7 @@ def rejection_message(
                     f"Keep the full result of `{config.generated_command}` together: stage it, "
                     "commit it, and only then publish."
                 )
-            return _raw_pr_message(force=_push_uses_force(push_args))
-
-        branch_target = _branch_switch_target(invocation)
-        if branch_target is not None:
-            signoff = invocation.env.get(config.branch_switch_signoff_env)
-            if signoff != branch_target:
-                return (
-                    "Refusing branch-changing git command without explicit user signoff. "
-                    "After the user approves switching to that specific branch, re-run the "
-                    f"command with {config.branch_switch_signoff_env}={branch_target} "
-                    "immediately before git."
-                )
+            return _raw_pr_message()
 
         if config.generated_paths and any(
             _arg_targets_generated(target, config.generated_paths, cwd=invocation.cwd)

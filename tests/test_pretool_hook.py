@@ -18,7 +18,6 @@ from agent_issues.pretool_hook import BinaryBlock, CommandFamilyBlock, HookConfi
 
 def _config() -> HookConfig:
     return HookConfig(
-        branch_switch_signoff_env="PROJECT_BRANCH_SWITCH_SIGNOFF",
         generated_paths=("data/generated",),
         generated_command="make generate",
         command_family_blocks=(
@@ -57,8 +56,8 @@ def test_blocks_raw_publish_paths() -> None:
     )
 
 
-def test_reports_force_push_guidance() -> None:
-    assert "agent-submit --force" in (
+def test_force_push_gets_standard_publish_guidance() -> None:
+    assert "agent-submit" in (
         rejection_message("git push --force origin HEAD", _config()) or ""
     )
 
@@ -83,17 +82,9 @@ def test_blocks_kill_by_name() -> None:
     assert "pkill/killall" in (rejection_message("sudo pkill python", _config()) or "")
 
 
-def test_branch_switch_requires_signoff() -> None:
-    assert "PROJECT_BRANCH_SWITCH_SIGNOFF=feature" in (
-        rejection_message("git switch feature", _config()) or ""
-    )
-    assert (
-        rejection_message(
-            "PROJECT_BRANCH_SWITCH_SIGNOFF=feature git switch feature",
-            _config(),
-        )
-        is None
-    )
+def test_allows_branch_switches() -> None:
+    assert rejection_message("git switch feature", _config()) is None
+    assert rejection_message("git checkout -b feature", _config()) is None
 
 
 def test_generated_paths_are_updated_only_by_generator() -> None:
@@ -353,7 +344,6 @@ def test_load_config_reads_json5(tmp_path: Path) -> None:
     path.write_text(
         """
 {
-  branch_switch_signoff_env: "X_SIGNOFF",
   generated_paths: ["out/generated"],
   command_family_blocks: [
     {command: "rustfmt", message: "Use make fmt."},
@@ -362,7 +352,6 @@ def test_load_config_reads_json5(tmp_path: Path) -> None:
 """
     )
     config = pretool_hook.load_config(path)
-    assert config.branch_switch_signoff_env == "X_SIGNOFF"
     assert config.generated_paths == ("out/generated",)
     assert config.command_family_blocks[0].command == "rustfmt"
 
