@@ -35,7 +35,6 @@ HOOK_CONFIG = f"""{JSON5_GENERATED_BEGIN}
   // Repo-specific settings for the shared agent-issues PreToolUse hook. This
   // hook is a convention guardrail for good-faith agents, not a security
   // sandbox.
-  branch_switch_signoff_env: "AGENT_BRANCH_SWITCH_SIGNOFF",
   generated_paths: [],
   generated_command: "the generator target",
   github_issue_guidance: "local JSON5 issue files in issues/",

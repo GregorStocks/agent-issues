@@ -114,13 +114,12 @@ issue-lint
 
 ## Branch Policy
 
-Agents usually work on a branch with two random English words in the name. Stay
-on the current branch unless the user explicitly asks you to change branches.
+Agents usually work on a branch with two random English words in the name.
+Normally stay on the current branch; switch only when the task actually calls for it.
 Do not create replacement branches as part of normal issue or PR workflow.
 
-Merge the default branch into the work branch when the workflow calls for
-updates. Do not rebase or force-push unless the user explicitly approves that
-operation.
+Prefer merging the default branch into the work branch when the workflow calls for updates.
+Rebasing or force-pushing a work branch is fine when it is the better tool; publish rewritten history with `agent-submit --force`.
 
 If a working tree has unexpected changes, treat that as important context. Do
 not silently discard, revert, or exclude files from the PR. Inspect the changes
