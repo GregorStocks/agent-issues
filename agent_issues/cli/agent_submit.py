@@ -233,11 +233,8 @@ def preflight() -> int:
     return 0
 
 
-def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str:
-    """Create a PR if none exists on this branch, else edit the existing one.
-
-    Returns the PR number as a string. Prints the PR URL.
-    """
+def _find_open_pr(branch: str) -> str | None:
+    """Return the number of the open PR for branch, or None if there is none."""
     list_result = _run(
         ["gh", "pr", "list", "--head", branch, "--state", "open", "--json", "number"]
     )
@@ -252,8 +249,29 @@ def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str
             flush=True,
         )
         sys.exit(EXIT_PREFLIGHT)
+    return str(prs[0]["number"]) if prs else None
 
-    if not prs:
+
+def snapshot_feedback_ids(branch: str) -> frozenset[str]:
+    """Return IDs of review feedback already on the branch's open PR.
+
+    Taken before publishing so the watcher treats only these as already seen;
+    feedback that arrives while the push and after_publish hooks run is new.
+    """
+    pr_number = _find_open_pr(branch)
+    if pr_number is None:
+        return frozenset()
+    nwo = issue_watch_pr.get_repo_nwo()
+    return frozenset(f["id"] for f in issue_watch_pr.get_review_feedback(pr_number, nwo))
+
+
+def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str:
+    """Create a PR if none exists on this branch, else edit the existing one.
+
+    Returns the PR number as a string. Prints the PR URL.
+    """
+    pr_number = _find_open_pr(branch)
+    if pr_number is None:
         create_cmd = ["gh", "pr", "create", "--base", base, "--title", title, "--body", body]
         if draft:
             create_cmd.append("--draft")
@@ -265,7 +283,6 @@ def upsert_pr(branch: str, base: str, title: str, body: str, draft: bool) -> str
         assert pr_number.isdigit(), f"could not parse PR number from gh pr create output: {url!r}"
         return pr_number
 
-    pr_number = str(prs[0]["number"])
     edit_result = _run(["gh", "pr", "edit", pr_number, "--title", title, "--body", body])
     assert edit_result.returncode == 0, f"gh pr edit failed: {edit_result.stderr}"
     view_result = _run(["gh", "pr", "view", pr_number, "--json", "url", "--jq", ".url"])
@@ -388,6 +405,7 @@ def main() -> None:
         if code != 0:
             sys.exit(code)
 
+    feedback_seen = snapshot_feedback_ids(branch)
     push_code = _push(force=args.force)
     if push_code != 0:
         sys.exit(push_code)
@@ -418,6 +436,6 @@ def main() -> None:
         if code != 0:
             sys.exit(code)
 
-    watcher_code = issue_watch_pr.run(pr=pr_number)
+    watcher_code = issue_watch_pr.run(pr=pr_number, feedback_seen=feedback_seen)
     _print_next_step(watcher_code)
     sys.exit(watcher_code)

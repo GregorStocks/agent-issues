@@ -1,9 +1,10 @@
 """Tests for agent_issues.cli.agent_submit."""
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from subprocess import CompletedProcess
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -387,6 +388,7 @@ def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
         patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "snapshot_feedback_ids", return_value=frozenset()),
         patch.object(agent_submit, "_push", return_value=0) as push_mock,
         patch.object(agent_submit, "upsert_pr", return_value="42"),
         patch.object(issue_watch_pr, "run", return_value=2) as watcher_mock,
@@ -394,7 +396,7 @@ def test_main_runs_full_flow_and_relays_watcher_exit() -> None:
     ):
         agent_submit.main()
     assert exc.value.code == 2
-    watcher_mock.assert_called_once_with(pr="42")
+    watcher_mock.assert_called_once_with(pr="42", feedback_seen=frozenset())
     push_mock.assert_called_once_with(force=False)
 
 
@@ -432,6 +434,7 @@ def test_main_allows_escaped_backticks_with_flag() -> None:
         patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "snapshot_feedback_ids", return_value=frozenset()),
         patch.object(agent_submit, "_push", return_value=0),
         patch.object(agent_submit, "upsert_pr", return_value="42"),
         patch.object(issue_watch_pr, "run", return_value=0),
@@ -450,6 +453,7 @@ def test_main_passes_force_flag_to_push() -> None:
         patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "snapshot_feedback_ids", return_value=frozenset()),
         patch.object(agent_submit, "_push", return_value=0) as push_mock,
         patch.object(agent_submit, "upsert_pr", return_value="42"),
         patch.object(issue_watch_pr, "run", return_value=0),
@@ -478,6 +482,7 @@ def test_main_exits_on_push_failure_without_upserting() -> None:
         patch.object(agent_submit, "load_submit_hooks", return_value=agent_submit.SubmitHooks(root=Path.cwd())),
         patch.object(agent_submit, "_current_branch", return_value="feature-x"),
         patch.object(agent_submit, "_default_branch", return_value="main"),
+        patch.object(agent_submit, "snapshot_feedback_ids", return_value=frozenset()),
         patch.object(agent_submit, "_push", return_value=128),
         patch.object(agent_submit, "upsert_pr") as upsert_mock,
         pytest.raises(SystemExit) as exc,
@@ -531,6 +536,7 @@ def test_main_runs_submit_hooks_around_publish() -> None:
         patch.object(agent_submit, "_ensure_branch_unchanged", return_value=0),
         patch.object(agent_submit, "_ensure_head_unchanged", return_value=0),
         patch.object(agent_submit, "_ensure_clean_worktree", return_value=0),
+        patch.object(agent_submit, "snapshot_feedback_ids", return_value=frozenset()),
         patch.object(agent_submit, "_push", side_effect=push),
         patch.object(agent_submit, "upsert_pr", side_effect=upsert_pr),
         patch.object(issue_watch_pr, "run", return_value=0),
@@ -585,3 +591,107 @@ def test_main_exits_when_prepare_hook_leaves_dirty_tree() -> None:
 
     assert exc.value.code == agent_submit.EXIT_PREFLIGHT
     push_mock.assert_not_called()
+
+
+def test_snapshot_feedback_ids_is_empty_without_open_pr() -> None:
+    from agent_issues.cli import issue_watch_pr
+
+    with (
+        patch.object(agent_submit, "_run", return_value=_result(stdout="[]")),
+        patch.object(issue_watch_pr, "get_review_feedback") as feedback_mock,
+    ):
+        assert agent_submit.snapshot_feedback_ids("feature-x") == frozenset()
+    feedback_mock.assert_not_called()
+
+
+def _run_main_with_after_publish_hook(
+    snapshot: list[dict], during_hook: list[dict], reactions: list[dict]
+) -> int:
+    """Run agent-submit end to end with the real watcher.
+
+    The PR already has `snapshot` feedback before publishing; by the time the
+    after_publish hook finishes it has `during_hook`.
+    """
+    from agent_issues.cli import issue_watch_pr
+
+    hooks = agent_submit.SubmitHooks(
+        root=Path.cwd(), after_publish=("make signoff",)
+    )
+    pr_feedback = snapshot
+
+    def run_hooks(*_args: object, **_kwargs: object) -> int:
+        nonlocal pr_feedback
+        pr_feedback = during_hook
+        return 0
+
+    with (
+        patch.object(sys, "argv", ["agent-submit", "--title", "T", "--body", "B"]),
+        patch.multiple(
+            agent_submit,
+            preflight=Mock(return_value=0),
+            load_submit_hooks=Mock(return_value=hooks),
+            _current_branch=Mock(return_value="feature-x"),
+            _default_branch=Mock(return_value="main"),
+            _head_sha=Mock(return_value="abc123"),
+            _find_open_pr=Mock(return_value="42"),
+            _push=Mock(return_value=0),
+            upsert_pr=Mock(return_value="42"),
+            run_submit_hooks=Mock(side_effect=run_hooks),
+            _ensure_branch_unchanged=Mock(return_value=0),
+            _ensure_head_unchanged=Mock(return_value=0),
+            _ensure_clean_worktree=Mock(return_value=0),
+        ),
+        patch.multiple(
+            issue_watch_pr,
+            get_repo_nwo=Mock(return_value="o/r"),
+            get_pr_lifecycle_state=Mock(return_value="open"),
+            check_merge_conflict=Mock(return_value=False),
+            get_review_feedback=Mock(side_effect=lambda *_: pr_feedback),
+            get_checks=Mock(return_value=[{"name": "ci", "bucket": "pass"}]),
+            get_pr_reactions=Mock(return_value=reactions),
+        ),
+        patch.object(issue_watch_pr.time, "sleep"),
+        # The first poll already sits past the no-eyes timeout, so a missed review
+        # makes the watcher exit clean at once instead of polling forever.
+        patch.object(
+            issue_watch_pr.time,
+            "monotonic",
+            side_effect=[0.0, issue_watch_pr.NO_EYES_TIMEOUT + 1],
+        ),
+        pytest.raises(SystemExit) as exc,
+    ):
+        agent_submit.main()
+    return exc.value.code
+
+
+def _feedback_item(id: str, formatted: str) -> dict:
+    return {
+        "id": id,
+        "formatted": formatted,
+        "created_at": datetime.now(timezone.utc) - timedelta(minutes=5),
+    }
+
+
+def test_main_reports_review_posted_during_after_publish_hook(capsys) -> None:
+    old = _feedback_item("comment:1", "[COMMENT] @codex: old nit")
+    new = _feedback_item("review:2", "[COMMENTED] @codex: new bug")
+
+    code = _run_main_with_after_publish_hook(
+        snapshot=[old], during_hook=[old, new], reactions=[]
+    )
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "new bug" in out
+    assert "old nit" not in out
+
+
+def test_main_does_not_report_feedback_addressed_before_resubmit(capsys) -> None:
+    old = _feedback_item("comment:1", "[COMMENT] @codex: old nit")
+
+    code = _run_main_with_after_publish_hook(
+        snapshot=[old], during_hook=[old], reactions=[{"content": "+1"}]
+    )
+
+    assert code == 0
+    assert "new review comment" not in capsys.readouterr().out
