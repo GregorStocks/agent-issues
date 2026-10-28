@@ -324,3 +324,51 @@ def test_run_writes_detailed_log_when_logs_dir_exists(tmp_path: Path) -> None:
     assert "poll=1 observed elapsed=0.0s" in content
     assert "plus_one=True" in content
     assert "exiting clean with codex approval" in content
+
+
+def test_run_reports_feedback_missing_from_feedback_seen(capsys) -> None:
+    """Feedback that arrived after the caller's snapshot is new, even if it already
+    exists when the watcher starts (for example, posted during after_publish hooks)."""
+    passing_checks = [{"name": "lint", "bucket": "pass", "link": "l"}]
+    old = _feedback("[COMMENT] @codex: old nit", id="comment:1", seconds_old=600)
+    during_hooks = _feedback("[COMMENTED] @codex: new bug", id="review:2", seconds_old=120)
+
+    with (
+        patch.object(issue_watch_pr, "get_repo_nwo", return_value="owner/repo"),
+        patch.object(issue_watch_pr, "get_pr_lifecycle_state", return_value="open"),
+        patch.object(issue_watch_pr, "check_merge_conflict", return_value=False),
+        patch.object(issue_watch_pr, "get_review_feedback", return_value=[old, during_hooks]),
+        patch.object(issue_watch_pr, "get_checks", return_value=passing_checks),
+        patch.object(issue_watch_pr, "get_pr_reactions", return_value=[]),
+        patch.object(issue_watch_pr.time, "sleep"),
+        patch.object(issue_watch_pr.time, "monotonic", return_value=0.0),
+    ):
+        code = issue_watch_pr.run("123", feedback_seen={"comment:1"})
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "1 new review comment(s)" in out
+    assert "new bug" in out
+    assert "old nit" not in out
+
+
+def test_run_ignores_feedback_in_feedback_seen(capsys) -> None:
+    """On a resubmit, feedback addressed earlier is in the snapshot and stays ignored."""
+    passing_checks = [{"name": "lint", "bucket": "pass", "link": "l"}]
+    plus_one = [{"content": "+1"}]
+    old = _feedback("[COMMENT] @codex: old nit", id="comment:1", seconds_old=600)
+
+    with (
+        patch.object(issue_watch_pr, "get_repo_nwo", return_value="owner/repo"),
+        patch.object(issue_watch_pr, "get_pr_lifecycle_state", return_value="open"),
+        patch.object(issue_watch_pr, "check_merge_conflict", return_value=False),
+        patch.object(issue_watch_pr, "get_review_feedback", return_value=[old]),
+        patch.object(issue_watch_pr, "get_checks", return_value=passing_checks),
+        patch.object(issue_watch_pr, "get_pr_reactions", return_value=plus_one),
+        patch.object(issue_watch_pr.time, "sleep"),
+        patch.object(issue_watch_pr.time, "monotonic", return_value=0.0),
+    ):
+        code = issue_watch_pr.run("123", feedback_seen={"comment:1"})
+
+    assert code == 0
+    assert "new review comment" not in capsys.readouterr().out

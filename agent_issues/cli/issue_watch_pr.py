@@ -8,7 +8,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Collection
 
 POLL_INTERVAL = 30
 COMMENT_GRACE = 20
@@ -258,8 +258,11 @@ def _print_feedback(items: list[dict]) -> None:
         print(f"  {item['formatted']}")
 
 
-def run(pr: str | None = None) -> int:
+def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> int:
     """Watch a PR. Returns an exit code rather than calling sys.exit.
+
+    feedback_seen is the set of feedback IDs to treat as already handled.
+    When omitted, all feedback present when the watcher starts is treated as seen.
 
     Exit codes:
         0 - clean (merged, CI pass + codex approved, or CI pass without codex)
@@ -286,7 +289,10 @@ def run(pr: str | None = None) -> int:
             print("\nPR was closed without merging.", flush=True)
             return 1
 
-        baseline_feedback = {f["id"] for f in get_review_feedback(pr, nwo)}
+        if feedback_seen is not None:
+            baseline_feedback = set(feedback_seen)
+        else:
+            baseline_feedback = {f["id"] for f in get_review_feedback(pr, nwo)}
         _log(logging.INFO, "baseline feedback count=%s ids=%s", len(baseline_feedback), sorted(baseline_feedback))
 
         start = time.monotonic()
