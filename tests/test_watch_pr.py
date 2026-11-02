@@ -120,7 +120,8 @@ def _thread(title: str, *, replied: bool, outdated: bool = False, resolved: bool
         "isOutdated": outdated,
         "path": "crates/core/src/campaign.rs",
         "line": None if outdated else 1198,
-        "comments": {"nodes": comments},
+        "comments": {"nodes": comments[:1]},
+        "lastComment": {"nodes": [{"author": comments[-1]["author"]}]},
     }
 
 
@@ -815,3 +816,24 @@ def test_completed_summary_prevents_no_eyes_timeout_bypassing_thread_gate(capsys
     out = capsys.readouterr().out
     assert "No codex review" not in out
     assert "Apply acquisition gold" in out
+
+
+def test_ended_code_review_still_checks_unresolved_security_threads(capsys) -> None:
+    security = {"commit_sha": HEAD_SHA, "has_any_findings": True, "has_unresolved_findings": True, "status": "completed"}
+    state = _codex_state(status="cancelled", security=security)
+    threads = [_thread("Validate untrusted input", replied=False)]
+    with _watch(checks=PASSING, codex_state=state, threads=threads):
+        code = issue_watch_pr.run("249", feedback_seen=set())
+
+    assert code == 2
+    assert "Validate untrusted input" in capsys.readouterr().out
+
+
+def test_thread_addressed_uses_the_actual_last_comment() -> None:
+    """A long thread where the author replied earlier but the reviewer had the last word."""
+    thread = _thread("Long discussion", replied=True)
+    thread["lastComment"] = {"nodes": [{"author": {"login": "chatgpt-codex-connector"}}]}
+    with patch.object(issue_watch_pr, "run_gh", return_value=_gh_result(_threads_payload(thread))):
+        threads = issue_watch_pr.get_unresolved_review_threads("249", "o/r", PR_AUTHOR)
+    assert threads is not None
+    assert [t["addressed"] for t in threads] == [False]

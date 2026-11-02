@@ -306,8 +306,11 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
           isOutdated
           path
           line
-          comments(first: 50) {
+          comments(first: 1) {
             nodes { author { login } body createdAt url }
+          }
+          lastComment: comments(last: 1) {
+            nodes { author { login } }
           }
         }
       }
@@ -372,7 +375,8 @@ def get_unresolved_review_threads(pr: str, nwo: str, pr_author: str) -> list[dic
         comments = node["comments"]["nodes"]
         if not comments:
             continue
-        logins = [((c.get("author") or {}).get("login") or "") for c in comments]
+        last = ((node.get("lastComment") or {}).get("nodes") or comments)[-1]
+        logins = [((c.get("author") or {}).get("login") or "") for c in (comments[0], last)]
         if logins[0] == pr_author:
             continue
         threads.append(
@@ -718,7 +722,9 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
             all_checks_pass = bool(checks) and all(
                 c.get("bucket") in _PASS_BUCKETS for c in checks
             )
-            codex_completed = codex_status == "completed"
+            # "ended" (code review failed/cancelled) goes through the same
+            # unresolved-thread gate, since a security review may have findings.
+            codex_completed = codex_status in ("completed", "ended")
             if codex_completed:
                 summary_age = (datetime.now(timezone.utc) - codex_state["updated_at"]).total_seconds()
                 # Give inline comments from the same review time to land.
@@ -781,18 +787,16 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
                     poll_count,
                     head["sha"],
                 )
+                if codex_status == "ended":
+                    status = _review_part(codex_state, "code_review").get("status")
+                    print(
+                        f"\n{checks_text} Codex review of {head['sha'][:10]} ended with status "
+                        f"{status!r}. No review feedback.",
+                        flush=True,
+                    )
+                    return 0
                 print(
                     f"\n{checks_text} Codex finished reviewing {head['sha'][:10]}. No review feedback.",
-                    flush=True,
-                )
-                return 0
-
-            if all_checks_pass and not new_feedback and codex_status == "ended":
-                status = _review_part(codex_state, "code_review").get("status")
-                _log(logging.INFO, "poll=%s exiting clean; codex review ended with status=%s", poll_count, status)
-                print(
-                    f"\nAll checks passed. Codex review of {head['sha'][:10]} ended with status "
-                    f"{status!r} and no review feedback.",
                     flush=True,
                 )
                 return 0
