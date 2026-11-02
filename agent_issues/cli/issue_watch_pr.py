@@ -277,20 +277,21 @@ def classify_codex_review(state: dict | None, head_sha: str) -> str:
     code = _review_part(state, "code_review")
     if code.get("commit_sha") != head_sha:
         return "stale"
-    status = code.get("status")
-    if status in _CODEX_ENDED_STATUSES:
-        return "ended"
-    if status != "completed":
-        return "reviewing"
     security = _review_part(state, "security_review")
     security_status = security.get("status")
-    if (
+    security_running = (
         security.get("commit_sha") == head_sha
         and security_status is not None
         and security_status != "completed"
         and security_status not in _CODEX_ENDED_STATUSES
-    ):
+    )
+    status = code.get("status")
+    if status != "completed" and status not in _CODEX_ENDED_STATUSES:
         return "reviewing"
+    if security_running:
+        return "reviewing"
+    if status in _CODEX_ENDED_STATUSES:
+        return "ended"
     return "completed"
 
 
@@ -627,7 +628,9 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
             saw_plus_one = codex_status == "absent" and has_reaction_since(
                 reactions, "+1", head["committed_at"]
             )
-            if saw_eyes or codex_status == "reviewing":
+            # A completed summary also proves Codex reviewed the head, so the
+            # no-eyes timeout must not bypass the unresolved-thread gate.
+            if saw_eyes or codex_status in ("reviewing", "completed"):
                 eyes_seen = True
 
             all_feedback = get_review_feedback(pr, nwo)

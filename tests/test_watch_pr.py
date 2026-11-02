@@ -786,3 +786,32 @@ def test_review_threads_follow_pagination() -> None:
     assert [t["addressed"] for t in threads] == [True, False]
     assert "cursor=CUR1" in mock_gh.call_args_list[1].args
     assert "cursor=CUR1" not in mock_gh.call_args_list[0].args
+
+
+def test_failed_code_review_with_running_security_review_is_reviewing() -> None:
+    security = {"commit_sha": HEAD_SHA, "has_any_findings": None, "has_unresolved_findings": None, "status": "running"}
+    state = _codex_state(status="failed", security=security)
+    assert issue_watch_pr.classify_codex_review(state, HEAD_SHA) == "reviewing"
+
+
+def test_completed_summary_prevents_no_eyes_timeout_bypassing_thread_gate(capsys) -> None:
+    """CI ran past the no-eyes timeout; the completed summary must still route through
+    the unresolved-thread check instead of "No codex review"."""
+    pending = [{"name": "build", "bucket": "pending", "link": "l"}]
+    state = _codex_state(has_any_findings=True, has_unresolved_findings=True)
+    threads = [_thread("Apply acquisition gold through every relic-granting path", replied=False)]
+    with (
+        _watch(checks=PASSING, codex_state=state, threads=threads),
+        patch.object(issue_watch_pr, "get_checks", side_effect=[pending, PASSING]),
+        patch.object(
+            issue_watch_pr.time,
+            "monotonic",
+            side_effect=[0.0, issue_watch_pr.NO_EYES_TIMEOUT + 1, issue_watch_pr.NO_EYES_TIMEOUT + 31],
+        ),
+    ):
+        code = issue_watch_pr.run("249", feedback_seen=set())
+
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "No codex review" not in out
+    assert "Apply acquisition gold" in out
