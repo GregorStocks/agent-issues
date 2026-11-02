@@ -649,6 +649,14 @@ def _run_main_with_after_publish_hook(
             get_review_feedback=Mock(side_effect=lambda *_: pr_feedback),
             get_checks=Mock(return_value=[{"name": "ci", "bucket": "pass"}]),
             get_pr_reactions=Mock(return_value=reactions),
+            get_pr_head=Mock(
+                return_value={
+                    "sha": "abc123",
+                    "committed_at": datetime(2026, 11, 2, tzinfo=timezone.utc),
+                    "author": "me",
+                }
+            ),
+            get_codex_review_state=Mock(return_value=None),
         ),
         patch.object(issue_watch_pr.time, "sleep"),
         # The first poll already sits past the no-eyes timeout, so a missed review
@@ -690,7 +698,7 @@ def test_main_does_not_report_feedback_addressed_before_resubmit(capsys) -> None
     old = _feedback_item("comment:1", "[COMMENT] @codex: old nit")
 
     code = _run_main_with_after_publish_hook(
-        snapshot=[old], during_hook=[old], reactions=[{"content": "+1"}]
+        snapshot=[old], during_hook=[old], reactions=[{"content": "+1", "created_at": "2026-11-02T00:05:00Z"}]
     )
 
     assert code == 0

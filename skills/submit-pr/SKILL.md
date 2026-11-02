@@ -92,13 +92,16 @@ For each canonical key, locate the issue file:
   Keep polling through `agent-submit`'s own CI/review watching and apply the exit-code handling below, including timeout guidance.
   If CI is passing and `agent-submit` has not exited, it may still be waiting for review.
 
+  The watcher reads Codex's "Codex Review Summary" comment when the repo has one: Codex is done once that comment reports a `completed` code review for the PR's current head commit, with or without a 👍.
+  Without that comment it falls back to reactions on the PR body, where 👀 means reviewing and a 👍 counts only if it was added after the head commit.
+
 5. **Interpret the exit code:**
 
    | Code  | Meaning                                                                                   |
    |-------|-------------------------------------------------------------------------------------------|
-   | 0     | All clean. Done — exit the loop.                                                          |
+   | 0     | All clean. Done — exit the loop. If it printed a warning about unresolved review threads you already replied to, resolve the ones you addressed (`gh api graphql` `resolveReviewThread`, or the PR UI). |
    | 1     | CI failed or merge conflict. If merge conflict, merge the default branch and resolve. Otherwise use `gh run view <run-id> --log-failed` (ID from the printed link) to find the failure, fix the root cause, commit, then loop back to step 1. |
-   | 2     | Review feedback arrived. Read the printed feedback; for inline comments fetch full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each comment, commit, then loop back to step 1. |
+   | 2     | Review feedback arrived, or Codex finished the head but unresolved review threads on current code have no reply from you. Read the printed feedback; for inline comments fetch full context with `gh api repos/{owner}/{repo}/pulls/{number}/comments`. Address each comment (fix it, or reply on the thread explaining why not), reply on and resolve threads you addressed, commit if needed, then loop back to step 1. |
    | 4     | Watcher timed out. Stop and consult the user before continuing. If the user asks you to continue later, first inspect and address any PR feedback that arrived while stopped, then re-run `agent-submit`; do not replace it with manual PR watching via `gh` or connector tools. |
    | 10+   | Preflight or submit hook failed (on default branch, dirty working tree, not a git repo, failed local validation/signoff hook, etc.). Fix and loop back to step 1. |
 
