@@ -224,8 +224,9 @@ def get_codex_review_state(pr: str, nwo: str) -> dict | None:
     The comment carries a machine-readable marker such as
     `<!-- codex-review-state:v1 {"code_review": {"commit_sha": ..., "status":
     "completed", "has_unresolved_findings": ...}, "security_review": {...}} -->`.
-    Returns the parsed object plus "updated_at" (datetime), or None when the
-    repo has no summary comment.
+    Returns the parsed object plus "updated_at" (datetime), None when the
+    repo has no summary comment, or {"fetch_failed": True} when the comments
+    could not be fetched.
     """
     result = run_gh(
         "api",
@@ -236,7 +237,8 @@ def get_codex_review_state(pr: str, nwo: str) -> dict | None:
     )
     if result.returncode != 0:
         _log(logging.WARNING, "failed to fetch issue comments for pr=%s repo=%s", pr, nwo)
-        return None
+        # Not None: a failed fetch must not enable the reaction fallback.
+        return {"fetch_failed": True}
     latest: tuple[datetime, dict] | None = None
     for comment in _json_lines(result.stdout):
         body = comment.get("body") or ""
@@ -267,6 +269,7 @@ def classify_codex_review(state: dict | None, head_sha: str) -> str:
 
     Returns one of:
         "absent"    - no summary comment; fall back to reactions
+        "unknown"   - the summary could not be fetched this poll
         "stale"     - latest code review is for an older commit
         "reviewing" - a review of the head is still running
         "ended"     - the head's review ended without completing (e.g. failed)
@@ -274,6 +277,8 @@ def classify_codex_review(state: dict | None, head_sha: str) -> str:
     """
     if state is None:
         return "absent"
+    if state.get("fetch_failed"):
+        return "unknown"
     code = _review_part(state, "code_review")
     if code.get("commit_sha") != head_sha:
         return "stale"
@@ -729,10 +734,16 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
                 summary_age = (datetime.now(timezone.utc) - codex_state["updated_at"]).total_seconds()
                 # Give inline comments from the same review time to land.
                 codex_completed = summary_age >= COMMENT_GRACE
-            if all_checks_pass and not new_feedback and codex_completed:
+            # By the time Codex finishes, any CI would have registered checks, so a
+            # PR with no checks at all does not wait on CI here.
+            if (all_checks_pass or not checks) and not new_feedback and codex_completed:
                 passed = [c for c in checks if c.get("bucket") == "pass"]
                 skipped = [c for c in checks if c.get("bucket") == "skipping"]
-                checks_text = f"All checks passed ({len(passed)} passed, {len(skipped)} skipped)."
+                checks_text = (
+                    f"All checks passed ({len(passed)} passed, {len(skipped)} skipped)."
+                    if checks
+                    else "No CI checks detected."
+                )
                 has_unresolved = any(
                     _review_part(codex_state, key).get("has_unresolved_findings")
                     for key in ("code_review", "security_review")

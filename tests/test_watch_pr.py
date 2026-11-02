@@ -838,3 +838,29 @@ def test_thread_addressed_uses_the_actual_last_comment() -> None:
         threads = issue_watch_pr.get_unresolved_review_threads("249", "o/r", PR_AUTHOR)
     assert threads is not None
     assert [t["addressed"] for t in threads] == [False]
+
+
+def test_summary_fetch_failure_does_not_enable_plus_one_fallback(capsys) -> None:
+    state = {"fetch_failed": True}
+    assert issue_watch_pr.classify_codex_review(state, HEAD_SHA) == "unknown"
+    with _watch(
+        checks=PASSING,
+        codex_state=state,
+        reactions=[_plus_one()],
+        lifecycle=["open", "open", "merged"],
+    ) as mock_sleep:
+        issue_watch_pr.run("249", feedback_seen=set())
+    assert mock_sleep.call_count == 1
+    assert "Codex approved" not in capsys.readouterr().out
+
+
+def test_get_codex_review_state_reports_fetch_failure() -> None:
+    with patch.object(issue_watch_pr, "run_gh", return_value=_gh_result("", returncode=1, stderr="502")):
+        assert _real_get_codex_review_state("1", "o/r") == {"fetch_failed": True}
+
+
+def test_completed_summary_exits_0_when_pr_has_no_checks(capsys) -> None:
+    with _watch(checks=[], codex_state=_codex_state()):
+        code = issue_watch_pr.run("249", feedback_seen=set())
+    assert code == 0
+    assert "No CI checks detected. Codex finished reviewing" in capsys.readouterr().out
