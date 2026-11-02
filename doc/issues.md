@@ -112,6 +112,10 @@ agent-submit --title "Fix login redirect" --body "..."
 issue-watch-pr [<pr-number>]
 ```
 
+Waits for CI and Codex review of the PR's current head.
+Codex review state comes from the `codex-review-state:v1` marker in Codex's "Codex Review Summary" comment, falling back to PR-body reactions (👀 reviewing, 👍 after the head commit approved) in repos without it.
+When Codex completed the head but reports unresolved findings, the watcher lists the unresolved review threads: it exits 2 if any thread on current code has no reply from the PR author, otherwise it prints them as a warning and exits 0.
+
 ### Lint issues
 
 ```bash
