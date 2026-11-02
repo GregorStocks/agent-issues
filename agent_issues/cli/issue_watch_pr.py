@@ -632,9 +632,9 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
             saw_plus_one = codex_status == "absent" and has_reaction_since(
                 reactions, "+1", head["committed_at"]
             )
-            # A completed summary also proves Codex reviewed the head, so the
-            # no-eyes timeout must not bypass the unresolved-thread gate.
-            if saw_eyes or codex_status in ("reviewing", "completed"):
+            # A completed or ended summary also proves Codex reviewed the head,
+            # so the no-eyes timeout must not bypass the unresolved-thread gate.
+            if saw_eyes or codex_status in ("reviewing", "completed", "ended"):
                 eyes_seen = True
 
             all_feedback = get_review_feedback(pr, nwo)

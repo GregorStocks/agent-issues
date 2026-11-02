@@ -795,11 +795,12 @@ def test_failed_code_review_with_running_security_review_is_reviewing() -> None:
     assert issue_watch_pr.classify_codex_review(state, HEAD_SHA) == "reviewing"
 
 
-def test_completed_summary_prevents_no_eyes_timeout_bypassing_thread_gate(capsys) -> None:
-    """CI ran past the no-eyes timeout; the completed summary must still route through
-    the unresolved-thread check instead of "No codex review"."""
+@pytest.mark.parametrize("status", ["completed", "cancelled"])
+def test_finished_summary_prevents_no_eyes_timeout_bypassing_thread_gate(capsys, status) -> None:
+    """CI ran past the no-eyes timeout; a completed or ended summary must still route
+    through the unresolved-thread check instead of "No codex review"."""
     pending = [{"name": "build", "bucket": "pending", "link": "l"}]
-    state = _codex_state(has_any_findings=True, has_unresolved_findings=True)
+    state = _codex_state(status=status, has_any_findings=True, has_unresolved_findings=True)
     threads = [_thread("Apply acquisition gold through every relic-granting path", replied=False)]
     with (
         _watch(checks=PASSING, codex_state=state, threads=threads),
