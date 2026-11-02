@@ -295,10 +295,11 @@ def classify_codex_review(state: dict | None, head_sha: str) -> str:
 
 
 _REVIEW_THREADS_QUERY = """
-query($owner: String!, $name: String!, $number: Int!) {
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           isResolved
           isOutdated
@@ -315,31 +316,54 @@ query($owner: String!, $name: String!, $number: Int!) {
 """
 
 
-def get_unresolved_review_threads(pr: str, nwo: str, pr_author: str) -> list[dict]:
+def _fetch_review_thread_nodes(pr: str, nwo: str) -> list[dict] | None:
+    """All review thread nodes for the PR, following pagination; None on failure."""
+    owner, name = nwo.split("/", 1)
+    nodes: list[dict] = []
+    cursor: str | None = None
+    while True:
+        args = [
+            "api",
+            "graphql",
+            "-f",
+            f"query={_REVIEW_THREADS_QUERY}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"number={pr}",
+        ]
+        if cursor is not None:
+            args += ["-f", f"cursor={cursor}"]
+        result = run_gh(*args)
+        if result.returncode != 0:
+            _log(logging.WARNING, "failed to fetch review threads for pr=%s repo=%s", pr, nwo)
+            return None
+        try:
+            connection = json.loads(result.stdout)["data"]["repository"]["pullRequest"]["reviewThreads"]
+        except (json.JSONDecodeError, KeyError, TypeError):
+            _log(logging.WARNING, "malformed review threads response for pr=%s: %r", pr, result.stdout)
+            return None
+        nodes.extend(connection.get("nodes") or [])
+        page_info = connection.get("pageInfo") or {}
+        if not page_info.get("hasNextPage") or not page_info.get("endCursor"):
+            return nodes
+        cursor = page_info["endCursor"]
+
+
+def get_unresolved_review_threads(pr: str, nwo: str, pr_author: str) -> list[dict] | None:
     """Return unresolved review threads started by someone other than the PR author.
 
     Each item: {"path", "line", "outdated", "addressed", "first", "url"} where
     "addressed" means the PR author has the last word in the thread (replied
     after the latest reviewer comment) and "first" is the opening comment body.
+    Returns None when the threads could not be fetched, so callers do not
+    mistake a failed request for "no unresolved threads".
     """
-    owner, name = nwo.split("/", 1)
-    result = run_gh(
-        "api",
-        "graphql",
-        "-f",
-        f"query={_REVIEW_THREADS_QUERY}",
-        "-F",
-        f"owner={owner}",
-        "-F",
-        f"name={name}",
-        "-F",
-        f"number={pr}",
-    )
-    if result.returncode != 0:
-        _log(logging.WARNING, "failed to fetch review threads for pr=%s repo=%s", pr, nwo)
-        return []
-    data = json.loads(result.stdout)
-    nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    nodes = _fetch_review_thread_nodes(pr, nwo)
+    if nodes is None:
+        return None
     threads: list[dict] = []
     for node in nodes:
         if node.get("isResolved"):
@@ -700,9 +724,23 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
                 passed = [c for c in checks if c.get("bucket") == "pass"]
                 skipped = [c for c in checks if c.get("bucket") == "skipping"]
                 checks_text = f"All checks passed ({len(passed)} passed, {len(skipped)} skipped)."
-                code_review = _review_part(codex_state, "code_review")
-                if code_review.get("has_unresolved_findings"):
-                    threads = get_unresolved_review_threads(pr, nwo, head["author"])
+                has_unresolved = any(
+                    _review_part(codex_state, key).get("has_unresolved_findings")
+                    for key in ("code_review", "security_review")
+                )
+                threads = (
+                    get_unresolved_review_threads(pr, nwo, head["author"]) if has_unresolved else []
+                )
+                if threads is None:
+                    _log(logging.WARNING, "poll=%s could not fetch review threads; polling again", poll_count)
+                    print(
+                        f"  [{int(elapsed // 60)}m] Codex reports unresolved findings; "
+                        "could not fetch review threads, retrying...",
+                        flush=True,
+                    )
+                    time.sleep(POLL_INTERVAL)
+                    continue
+                if threads:
                     blocking = [t for t in threads if not t["addressed"] and not t["outdated"]]
                     _log(
                         logging.INFO,
@@ -725,16 +763,15 @@ def run(pr: str | None = None, feedback_seen: Collection[str] | None = None) -> 
                             flush=True,
                         )
                         return 2
-                    if threads:
-                        print(
-                            f"\n{checks_text} Codex finished reviewing {head['sha'][:10]} with no new feedback.\n"
-                            f"Warning: {len(threads)} review thread(s) are still unresolved, so Codex "
-                            "will not add its +1. Each has a reply or is outdated; resolve the ones "
-                            "you have addressed:",
-                            flush=True,
-                        )
-                        _print_threads(threads)
-                        return 0
+                    print(
+                        f"\n{checks_text} Codex finished reviewing {head['sha'][:10]} with no new feedback.\n"
+                        f"Warning: {len(threads)} review thread(s) are still unresolved, so Codex "
+                        "will not add its +1. Each has a reply or is outdated; resolve the ones "
+                        "you have addressed:",
+                        flush=True,
+                    )
+                    _print_threads(threads)
+                    return 0
                 _log(
                     logging.INFO,
                     "poll=%s exiting clean with codex review completed for head=%s",

@@ -734,3 +734,55 @@ def test_review_feedback_excludes_codex_summary_comment() -> None:
     ):
         feedback = issue_watch_pr.get_review_feedback("249", "o/r")
     assert [f["id"] for f in feedback] == ["comment:IC_2"]
+
+
+def test_thread_fetch_failure_keeps_polling_instead_of_exiting_clean(capsys) -> None:
+    state = _codex_state(has_any_findings=True, has_unresolved_findings=True)
+    with (
+        _watch(checks=PASSING, codex_state=state, lifecycle=["open", "open", "merged"]) as mock_sleep,
+        patch.object(issue_watch_pr, "run_gh", return_value=_gh_result("", returncode=1, stderr="boom")),
+    ):
+        code = issue_watch_pr.run("249", feedback_seen=set())
+
+    assert code == 0  # exits on "merged" after retrying
+    assert mock_sleep.call_count == 1
+    out = capsys.readouterr().out
+    assert "could not fetch review threads" in out
+    assert "No review feedback" not in out
+
+
+def test_unresolved_security_findings_are_checked(capsys) -> None:
+    security = {"commit_sha": HEAD_SHA, "has_any_findings": True, "has_unresolved_findings": True, "status": "completed"}
+    state = _codex_state(security=security)
+    threads = [_thread("Validate untrusted input", replied=False)]
+    with _watch(checks=PASSING, codex_state=state, threads=threads):
+        code = issue_watch_pr.run("249", feedback_seen=set())
+
+    assert code == 2
+    assert "Validate untrusted input" in capsys.readouterr().out
+
+
+def test_review_threads_follow_pagination() -> None:
+    page1 = {
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": True, "endCursor": "CUR1"},
+            "nodes": [_thread("First page finding", replied=True)],
+        }}}}
+    }
+    page2 = {
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [_thread("Second page finding", replied=False)],
+        }}}}
+    }
+    with patch.object(
+        issue_watch_pr,
+        "run_gh",
+        side_effect=[_gh_result(json.dumps(page1)), _gh_result(json.dumps(page2))],
+    ) as mock_gh:
+        threads = issue_watch_pr.get_unresolved_review_threads("249", "o/r", PR_AUTHOR)
+
+    assert threads is not None
+    assert [t["addressed"] for t in threads] == [True, False]
+    assert "cursor=CUR1" in mock_gh.call_args_list[1].args
+    assert "cursor=CUR1" not in mock_gh.call_args_list[0].args
